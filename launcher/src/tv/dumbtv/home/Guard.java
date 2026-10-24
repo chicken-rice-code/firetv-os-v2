@@ -167,7 +167,7 @@ public final class Guard extends AccessibilityService {
     /** The overlay window exists from service start; a GONE root keeps its surface hidden. */
     private void cover() {
         if (cover == null) return;
-        cover.setBackgroundColor(Config.get(this).background());
+        cover.setBackgroundColor(0xFF000000);
         cover.setVisibility(View.VISIBLE);
         handler.removeCallbacks(uncover);
         handler.postDelayed(uncover, COVER_MAX_MS);

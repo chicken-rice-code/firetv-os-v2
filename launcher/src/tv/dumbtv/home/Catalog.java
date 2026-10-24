@@ -50,11 +50,14 @@ final class Catalog {
         }
     }
 
-    /** Loads a banner, or an icon when the app ships no banner. Slow: call off the UI thread. */
+    /** Uses installed TV banners, falling back to installed icons. Call off the UI thread. */
     static void art(PackageManager pm, Item it) {
         if (it.info == null) return;
+        it.icon = it.info.loadIcon(pm);
         it.banner = it.info.loadBanner(pm);
-        if (it.banner == null) it.icon = it.info.loadIcon(pm);
+        if (it.banner == null && it.info.applicationInfo != null) {
+            it.banner = it.info.applicationInfo.loadBanner(pm);
+        }
     }
 
     /**

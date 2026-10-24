@@ -13,9 +13,8 @@ final class Item {
     boolean leanback;
     int state = -1;
     volatile boolean artRequested;
-    volatile Drawable banner, icon;
-    volatile int backgroundColor;
-    volatile boolean colorRequested;
+    volatile Drawable icon;
+    volatile Drawable banner;
 
     Item(String id, CharSequence label, Intent intent) {
         this.id = id;

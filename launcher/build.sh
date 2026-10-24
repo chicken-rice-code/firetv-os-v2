@@ -13,6 +13,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 # shellcheck disable=SC1091
 source version.env
 MIN_SDK=${MIN_SDK:-25}
+BUILD_MODE=${BUILD_MODE:-release}
+case $BUILD_MODE in
+  release) AAPT_FLAGS=(); DEX_MODE=--release; OUTPUT=build/dumbtv-home.apk ;;
+  debug) AAPT_FLAGS=(--debug-mode); DEX_MODE=--debug; OUTPUT=build/dumbtv-home-debug.apk ;;
+  *) echo "error: BUILD_MODE must be release or debug" >&2; exit 1 ;;
+esac
 
 SDK=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
 if [[ -z $SDK ]]; then
@@ -64,6 +70,7 @@ mkdir -p "$WORK/gen" "$WORK/classes" build
 
 "$BT/aapt2" compile --dir res -o "$WORK/res.zip"
 "$BT/aapt2" link -I "$JAR" --manifest AndroidManifest.xml "$WORK/res.zip" \
+  "${AAPT_FLAGS[@]}" \
   --min-sdk-version "$MIN_SDK" --target-sdk-version 28 \
   --version-code "$VERSION_CODE" --version-name "$VERSION_NAME" \
   --java "$WORK/gen" -o "$WORK/app.apk"
@@ -76,14 +83,14 @@ find src "$WORK/gen" -name '*.java' | while IFS= read -r file; do native_path "$
   -classpath "$JAR" -d "$WORK/classes" @"$WORK/sources.txt"
 
 find "$WORK/classes" -name '*.class' | while IFS= read -r file; do native_path "$file"; done > "$WORK/classes.txt"
-"$BT/d8.bat" --release --min-api "$MIN_SDK" --lib "$JAR" --output "$WORK" @"$WORK/classes.txt"
+"$BT/d8.bat" "$DEX_MODE" --min-api "$MIN_SDK" --lib "$JAR" --output "$WORK" @"$WORK/classes.txt"
 (cd "$WORK" && "$JAVA_HOME/bin/jar" uf app.apk classes.dex)
 
 "$BT/zipalign" -f -p 4 "$WORK/app.apk" "$WORK/aligned.apk"
 "$BT/apksigner.bat" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYPASS" --key-pass "pass:$KEYPASS" \
-  --out build/dumbtv-home.apk "$WORK/aligned.apk"
-"$BT/apksigner.bat" verify build/dumbtv-home.apk
+  --out "$OUTPUT" "$WORK/aligned.apk"
+"$BT/apksigner.bat" verify "$OUTPUT"
 
-perms=$("$BT/aapt2" dump permissions build/dumbtv-home.apk | grep -c 'uses-permission' || true)
-printf 'built build/dumbtv-home.apk  %s bytes  %s uses-permission entries\n' \
-  "$(wc -c < build/dumbtv-home.apk | tr -d ' ')" "$perms"
+perms=$("$BT/aapt2" dump permissions "$OUTPUT" | grep -c 'uses-permission' || true)
+printf 'built %s  %s bytes  %s uses-permission entries\n' "$OUTPUT" \
+  "$(wc -c < "$OUTPUT" | tr -d ' ')" "$perms"

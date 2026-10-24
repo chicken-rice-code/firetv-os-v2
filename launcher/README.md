@@ -1,18 +1,14 @@
-# dumbtv home
+# Home Together / dumbtv home
 
-A home screen for Fire TV that does one job: show your apps and your HDMI inputs.
+A native Fire TV dashboard with your apps, a shared greeting and real local weather. See [HOME_TOGETHER.md](HOME_TOGETHER.md) for the current v3 UI, local build/install commands and verification details. The existing Fire TV launcher setup is documented below.
 
-<p align="center">
-  <img src="../docs/assets/screens/home.png" alt="dumbtv home: a clock, an Apps row and an Inputs row" width="720">
-</p>
-
-- **54 KB.** Plain Java and Android views. No AndroidX, Kotlin, Compose, Play
+- **Small native APK.** Plain Java and Android views. No AndroidX, Kotlin, Compose, Play
   Services or any other library.
-- **Weather in the header.** Current conditions come from Open-Meteo for a city set in Options. The city and network address go to Open-Meteo; device location is not read.
+- **Weather beneath your apps.** Current conditions, feels-like temperature, high/low and twelve hourly forecasts come from Open-Meteo for a city chosen in Settings. All twelve hours stay visible in two rows of six. Successful readings are cached and labelled when stale or offline. The city/coordinates and network address go to Open-Meteo; device location is not read.
 - **No runtime permissions.** Fire OS 6 uses three permissions capped at Android 8.1. Weather uses the normal INTERNET permission. Check: `aapt2 dump permissions dumbtv-home.apk`.
 - **No ads, no recommended rows, no account, no analytics, no update checks.**
-- About 60–70 MB of memory with the home screen showing, about 37 MB while an app
-  plays (measured on a Fire TV Edition television with 1.4 GB of RAM).
+- **One consistent UI kit.** A near-black ambient canvas, charcoal surfaces, white focus outlines and a gentle 160 ms focus animation. Six installed-app banners fit across one row with labels beneath. The clock, greeting and main weather temperatures share the same font size and weight.
+- Resource use is checked on the development emulator; current-session results are recorded in git-ignored `report/`. Fire TV hardware measurements for this UI are outstanding.
 
 ## Install
 
@@ -37,36 +33,27 @@ Undo: `./launcher/install.sh --undo` gives HOME back to Amazon's launcher.
 |---|---|
 | OK | open the app, or switch to the input |
 | Hold OK, or ☰ Menu | Move, Rename, Hide, App info |
-| Move mode | ◀ ▶ moves the tile, ▲ ▼ moves it a line in the grid, any other key drops it |
-| Up from the top row | Options and Settings |
-| Back on the home screen | jump to the first tile |
+| Move mode | ◀ ▶ moves the tile, any other key drops it |
+| Up from the app row | Settings |
+| Back on the home screen | return focus to an app |
 | On an input: Back | back to the home screen |
 | On an input: ☰ Menu | show the input's name again |
 | Hold HOME | Fire OS quick menu (Amazon's, unchanged) |
 
-**Options** cycles each setting with ◀ ▶ or OK:
+**Settings** changes each choice with OK:
 
 | Setting | Choices |
 |---|---|
-| Accent | white, blue, cyan, green, amber, red, pink, violet |
-| Tiles | small, medium, large |
-| Layout | rows, or a grid that wraps to as many columns as fit |
-| App names | on focus, always, never |
 | Clock | system, 24-hour, 12-hour |
-| Inputs row | shown, hidden |
+| Temperature | Celsius or Fahrenheit |
+| Weather location | town/city and country; blank turns weather off |
 | Open inputs with | Automatic, the TV's app, dumbtv home (see below) |
-| Background | black, graphite, midnight, image, adaptive, adaptive tint |
-| Image dim, wallpaper rotation | for image backgrounds |
 
-Below them: Next wallpaper, which apps and inputs appear on the home screen, a
-reset for order, names and hidden tiles, and **Open Amazon's home screen**. Apps
-without a TV banner, like the Appstore, start hidden; tick them to add them.
+Also available: choose/reorder favourites, open a TV input, TV settings, reset order,
+names and hidden tiles, and **Open Amazon's home screen**. Apps
+without a TV launcher entry, like the Appstore, start hidden; tick them to add them.
 
-| Grid layout | Adaptive background | Adaptive tint |
-|---|---|---|
-| ![Grid layout](../docs/assets/screens/grid.png) | ![Adaptive background](../docs/assets/screens/adaptive.png) | ![Adaptive tint](../docs/assets/screens/tint.png) |
-
-Weather source: Open-Meteo. Set the location in Options. Leave it blank to turn the weather display off.
+Weather source: Open-Meteo. Until a place is configured, choose **Set weather location**. Static weather readings do not add unnecessary focus stops.
 
 ## HDMI inputs
 
@@ -105,12 +92,6 @@ clock=auto
 inputs=on
 # auto tv home
 switch=auto
-# black graphite midnight image adaptive adaptive-tint
-background=black
-# 0 20 40 60 80, image backgrounds only
-dim=40
-# off visit hourly daily daytime (visit = every return to the home screen)
-rotate=off
 apps.order=com.amazon.firetv.youtube,org.videolan.vlc
 apps.hide=org.videolan.vlc
 apps.show=com.amazon.venezia
@@ -120,28 +101,6 @@ name.com.droidlogic.tvinput/.services.Hdmi2InputService/HW6=PS5
 
 Comments go on their own line. Back it up with `adb pull`, restore it with
 `adb push`; changes apply the next time the home screen comes back.
-
-### Wallpapers
-
-No storage permission is needed: the launcher reads its own folder.
-
-- **One wallpaper:** push it as `wallpaper.jpg` (or `.jpeg`, `.png`, `.webp`) into
-  the folder above and set `background=image`.
-- **Several:** push them into a `wallpapers/` subfolder, with any names, and pick a
-  rotation. While that folder has images, `wallpaper.jpg` is ignored.
-
-```sh
-adb shell mkdir -p /sdcard/Android/data/tv.dumbtv.home/files/wallpapers
-adb push *.jpg /sdcard/Android/data/tv.dumbtv.home/files/wallpapers/
-```
-
-`rotate=daytime` matches wallpapers to the time of day by name: `morning` or `day`
-(06:00 to 13:00), `afternoon` or `evening` (13:00 to 20:00), `night` (the rest), as
-in `morning-coast.jpg`.
-
-`background=adaptive` takes a dark colour from the focused app's artwork.
-`background=adaptive-tint` keeps the wallpaper and adds a light wash of that
-colour; without a wallpaper it shows graphite.
 
 ## How HOME works on Fire OS
 
@@ -219,10 +178,14 @@ Delete both to stop.
 
 | File | What it is |
 |---|---|
-| `src/.../Home.java` | the home screen: clock, Apps row, Inputs row, tile menu, move mode |
-| `src/.../Tile.java` | one tile, drawn in a single `onDraw`: banner or icon, focus ring |
-| `src/.../Grid.java` | the grid layout |
-| `src/.../FocusColor.java` | the colour for the adaptive backgrounds |
+| `src/.../Home.java` | dashboard lifecycle, remote actions, app launches and focus restoration |
+| `src/.../HomeScreen.java` | responsive header, app row and weather layout |
+| `src/.../ClockGreeting.java` | aligned clock/greeting baselines and injectable time source |
+| `src/.../Tile.java` | installed app banners/icons with labels beneath |
+| `src/.../WeatherRow.java` | unboxed current conditions and twelve hourly forecasts |
+| `src/.../WeatherRepository.java` | HTTPS requests, cache, cancellation and retry backoff |
+| `src/.../WeatherIconView.java` | consistent Material outline vectors with day/night variants |
+| `src/.../Favorites.java` | remote selection and ordering of favourites |
 | `src/.../Catalog.java` | which apps and inputs exist, and their order |
 | `src/.../Item.java` | one app or input |
 | `src/.../Input.java` | the built-in input screen (`TvView`) |

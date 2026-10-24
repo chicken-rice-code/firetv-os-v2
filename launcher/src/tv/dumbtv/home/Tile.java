@@ -5,176 +5,77 @@ import android.graphics.Canvas;
 import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.LinearGradient;
-import android.graphics.Shader;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
-import android.media.tv.TvInputManager;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.view.MotionEvent;
 import android.view.View;
 
-/** A card drawn in one pass: banner, or icon plus name, or an input name; focus ring on top. */
+/** Installed app artwork above a real, accessible app label. No recreated brand wordmarks. */
 final class Tile extends View {
     final Item item;
     final String kind;
     private final CharSequence title;
-    private final int cardW, cardH, labelH;
-    private final boolean labelAlways;
-    private final float radius, stroke;
-    private final RectF card = new RectF();
+    private final int cardW, cardH;
+    private final float artH, radius, unit;
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final Path clip = new Path();
-    private final Path arrow = new Path();
-    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint inner = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final TextPaint under = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF art = new RectF();
     private boolean moving, hovered;
-    private int accent;
 
-    Tile(Context c, Item item, String kind, CharSequence title, int cardW, int cardH,
-            String labels, int accent) {
-        super(c);
-        this.item = item;
-        this.kind = kind;
-        this.title = title;
-        this.cardW = cardW;
-        this.cardH = cardH;
-        this.accent = accent;
-        boolean app = Catalog.APPS.equals(kind);
-        labelH = app && "always".equals(labels) ? Ui.dp(c, 26) : 0;
-        labelAlways = "always".equals(labels);
-
-        radius = Ui.dp(c, 13);
-        stroke = Ui.dp(c, 2f);
-
-        fill.setShader(new LinearGradient(0, 0, cardW, cardH,
-                new int[] {0x604C5E78, 0x3834415A, 0x48313D57}, null, Shader.TileMode.CLAMP));
-        edge.setStyle(Paint.Style.STROKE);
-        edge.setStrokeWidth(Ui.dp(c, 1));
-        edge.setColor(0x32FFFFFF);
-        ring.setStyle(Paint.Style.STROKE);
-        ring.setStrokeWidth(stroke);
-        ring.setColor(accent);
-        dot.setColor(0xFF34C759);
-        inner.setColor(Ui.TEXT);
-        inner.setTypeface(Ui.MEDIUM);
-        inner.setTextAlign(Paint.Align.CENTER);
-        inner.setTextSize(Ui.dp(c, app ? 14 : 17));
-        under.setColor(Ui.TEXT);
-        under.setTypeface(Ui.MEDIUM);
-        under.setTextAlign(Paint.Align.CENTER);
-        under.setTextSize(Ui.dp(c, 13));
-
-        setFocusable(true);
-        setClickable(true);
-        setLongClickable(true);
-        setContentDescription(title);
+    Tile(Context c, Item item, String kind, CharSequence title, int width, int height, String labels, int accent) {
+        super(c); this.item = item; this.kind = kind; this.title = title; cardW = width; cardH = height;
+        unit = width / 264f; artH = 154 * unit; radius = 17 * unit;
+        art.set(0, 0, width, artH); clip.addRoundRect(art, radius, radius, Path.Direction.CW);
+        text.setTypeface(Ui.REGULAR); text.setTextAlign(Paint.Align.CENTER); text.setTextSize(24 * unit);
+        setFocusable(true); setClickable(true); setLongClickable(true); setContentDescription(title);
+        setId(View.generateViewId());
     }
-
-    void setMoving(boolean on) {
-        moving = on;
-        invalidate();
+    void setMoving(boolean value) { moving = value; invalidate(); }
+    @Override protected void onMeasure(int w, int h) { setMeasuredDimension(cardW, cardH); }
+    @Override protected void onFocusChanged(boolean focused, int direction, Rect previous) {
+        super.onFocusChanged(focused, direction, previous); Ui.animateFocus(this, focused || hovered); invalidate();
     }
-
-    @Override
-    protected void onMeasure(int widthSpec, int heightSpec) {
-        setMeasuredDimension(cardW, cardH + labelH);
+    @Override public boolean onHoverEvent(MotionEvent e) {
+        boolean active = e.getActionMasked() != MotionEvent.ACTION_HOVER_EXIT;
+        if (hovered != active) { hovered = active; Ui.animateFocus(this, active || isFocused()); invalidate(); }
+        return super.onHoverEvent(e);
     }
-
-    @Override
-    protected void onSizeChanged(int w, int h, int oldW, int oldH) {
-        card.set(0, 0, cardW, cardH);
-        clip.reset();
-        clip.addRoundRect(card, radius, radius, Path.Direction.CW);
-    }
-
-    @Override
-    protected void onFocusChanged(boolean focused, int direction, Rect previous) {
-        super.onFocusChanged(focused, direction, previous);
-        invalidate();
-    }
-
-    @Override
-    public boolean onHoverEvent(MotionEvent event) {
-        int action = event.getActionMasked();
-        if (action == MotionEvent.ACTION_HOVER_ENTER || action == MotionEvent.ACTION_HOVER_MOVE) {
-            if (!hovered) {
-                hovered = true;
-                invalidate();
-            }
-        } else if (action == MotionEvent.ACTION_HOVER_EXIT && hovered) {
-            hovered = false;
-            invalidate();
-        }
-        return super.onHoverEvent(event);
-    }
-
-    @Override
-    protected void onDraw(Canvas canvas) {
-        Drawable banner = item.banner, icon = item.icon;
-        canvas.save();
-        canvas.clipPath(clip);
-        canvas.drawRect(card, fill);
-        if (banner != null) {
-            banner.setBounds(0, 0, cardW, cardH);
-            banner.draw(canvas);
-        } else if (icon != null) {
-            int size = cardH * 46 / 100;
-            int left = (cardW - size) / 2, top = cardH * 12 / 100;
-            icon.setBounds(left, top, left + size, top + size);
-            icon.draw(canvas);
-            drawLine(canvas, inner, cardW / 2f, cardH - cardH * 13 / 100f);
-        } else if (!Catalog.APPS.equals(kind)) {
-            drawLine(canvas, inner, cardW / 2f, cardH / 2f - (inner.ascent() + inner.descent()) / 2);
-        }
-        if (moving) canvas.drawColor(0x99000000);
-        canvas.restore();
-
-        if (item.state == TvInputManager.INPUT_STATE_CONNECTED) {
-            float r = Ui.dp(getContext(), 3.5f);
-            canvas.drawCircle(cardW - r * 3, r * 3, r, dot);
-        }
+    @Override protected void onDraw(Canvas canvas) {
+        super.onDraw(canvas);
         boolean active = isFocused() || hovered || moving;
-        edge.setColor(active ? 0x88FFFFFF : 0x32FFFFFF);
-        canvas.drawRoundRect(0.5f, 0.5f, cardW - 0.5f, cardH - 0.5f, radius, radius, edge);
+        canvas.save(); canvas.clipPath(clip);
+        paint.setStyle(Paint.Style.FILL); paint.setColor(active ? Ui.SURFACE_FOCUSED : Ui.SURFACE);
+        canvas.drawRect(art, paint);
+        Drawable artwork = item.banner != null ? item.banner : item.icon;
+        if (artwork != null) {
+            float maxW = item.banner != null ? cardW : 82 * unit;
+            float maxH = item.banner != null ? artH : 82 * unit;
+            int iw = Math.max(1, artwork.getIntrinsicWidth()), ih = Math.max(1, artwork.getIntrinsicHeight());
+            float fit = Math.min(maxW / iw, maxH / ih);
+            int w = Math.round(iw * fit), h = Math.round(ih * fit);
+            int left = (cardW - w) / 2, top = Math.round((artH - h) / 2);
+            artwork.setBounds(left, top, left + w, top + h); artwork.draw(canvas);
+        }
+        if (moving) canvas.drawColor(0x77000000);
+        canvas.restore();
+        paint.setStyle(Paint.Style.STROKE);
         if (active) {
-            float half = stroke / 2;
-            ring.setColor(isFocused() || moving ? accent : 0xFFFFFFFF);
-            ring.setAlpha(isFocused() || moving ? 255 : 190);
-            ring.setPathEffect(moving ? new DashPathEffect(new float[] {stroke * 3, stroke * 2}, 0) : null);
-            canvas.drawRoundRect(half, half, cardW - half, cardH - half, radius - half, radius - half, ring);
-            ring.setPathEffect(null);
+            paint.setStrokeWidth(4 * unit); paint.setColor(0xFF080A0C);
+            canvas.drawRoundRect(5 * unit, 5 * unit, cardW - 5 * unit, artH - 5 * unit,
+                    radius - 3 * unit, radius - 3 * unit, paint);
         }
-        if (moving) drawArrows(canvas);
-        boolean label = banner != null && labelAlways;
-        if (labelH > 0 && label) {
-            drawLine(canvas, under, cardW / 2f, cardH + labelH - Ui.dp(getContext(), 6));
-        }
-    }
-
-    private void drawLine(Canvas canvas, TextPaint paint, float x, float baseline) {
-        float room = cardW - Ui.dp(getContext(), 16);
-        CharSequence s = TextUtils.ellipsize(title, paint, room, TextUtils.TruncateAt.END);
-        canvas.drawText(s, 0, s.length(), x, baseline, paint);
-    }
-
-    private void drawArrows(Canvas canvas) {
-        float h = cardH / 6f, w = h * 0.7f, mid = cardH / 2f, pad = h * 0.8f;
-        inner.setStyle(Paint.Style.FILL);
-        arrow.reset();
-        arrow.moveTo(pad, mid);
-        arrow.lineTo(pad + w, mid - h / 2);
-        arrow.lineTo(pad + w, mid + h / 2);
-        arrow.close();
-        arrow.moveTo(cardW - pad, mid);
-        arrow.lineTo(cardW - pad - w, mid - h / 2);
-        arrow.lineTo(cardW - pad - w, mid + h / 2);
-        arrow.close();
-        canvas.drawPath(arrow, inner);
+        float stroke = (active ? 3 : 1) * unit;
+        paint.setStrokeWidth(stroke); paint.setColor(active ? Ui.TEXT : Ui.CARD_BORDER);
+        paint.setPathEffect(moving ? new DashPathEffect(new float[] {8 * unit, 5 * unit}, 0) : null);
+        canvas.drawRoundRect(stroke / 2, stroke / 2, cardW - stroke / 2, artH - stroke / 2,
+                radius, radius, paint);
+        paint.setPathEffect(null);
+        text.setColor(active ? Ui.TEXT : Ui.MUTED);
+        CharSequence label = TextUtils.ellipsize(title, text, cardW - 8 * unit, TextUtils.TruncateAt.END);
+        canvas.drawText(label, 0, label.length(), cardW / 2f, 203 * unit, text);
     }
 }

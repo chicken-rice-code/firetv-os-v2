@@ -1,183 +1,144 @@
 package tv.dumbtv.home;
 
-import android.util.Log;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.Locale;
 
-/** Keyless Open-Meteo lookup for the home-screen weather card and seven-day forecast. */
+/** HTTPS client and model. Unix timestamps preserve location forecasts across DST changes. */
 final class Weather {
-    private static final String TAG = "DumbTVWeather";
-
     private Weather() {}
-
-    static final class Day {
-        final String name;
-        final String symbol;
-        final int high;
-        final int low;
-
-        Day(String name, String symbol, int high, int low) {
-            this.name = name;
-            this.symbol = symbol;
-            this.high = high;
-            this.low = low;
+    static final class Location {
+        final String name, zone;
+        final double latitude, longitude;
+        Location(String name, double lat, double lon, String zone) {
+            this.name = name; latitude = lat; longitude = lon; this.zone = zone;
         }
     }
-
+    static final class Hour {
+        final long time;
+        final int temperature, code;
+        final boolean day;
+        Hour(long time, int temperature, int code, boolean day) {
+            this.time = time; this.temperature = temperature; this.code = code; this.day = day;
+        }
+    }
     static final class Current {
-        final String place;
-        final String temperature;
-        final String condition;
-        final String symbol;
-        final String error;
-        final List<Day> days;
-
-        private Current(String place, String temperature, String condition, String symbol,
-                        String error, List<Day> days) {
-            this.place = place;
-            this.temperature = temperature;
-            this.condition = condition;
-            this.symbol = symbol;
-            this.error = error;
-            this.days = days;
+        final Location location;
+        final int temperature, feelsLike, high, low, code;
+        final boolean day;
+        final long fetchedAt;
+        final List<Hour> hours;
+        Current(Location location, int temp, int feels, int high, int low, int code,
+                boolean day, long fetchedAt, List<Hour> hours) {
+            this.location = location; temperature = temp; feelsLike = feels; this.high = high;
+            this.low = low; this.code = code; this.day = day; this.fetchedAt = fetchedAt; this.hours = hours;
         }
-
-        static Current failure(String reason) {
-            return new Current("", "--\u00B0", reason, "!", reason, new ArrayList<>());
-        }
-    }
-
-    static Current fetch(String place) {
-        try {
-            JSONObject location = findLocation(place);
-            if (location == null) return Current.failure("Location not found");
-            double latitude = location.getDouble("latitude");
-            double longitude = location.getDouble("longitude");
-            String city = location.optString("name", place);
-            String country = location.optString("country_code", "");
-            String forecastUrl = "https://api.open-meteo.com/v1/forecast?latitude=" + latitude
-                    + "&longitude=" + longitude
-                    + "&current=temperature_2m,weather_code"
-                    + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
-                    + "&temperature_unit=celsius&forecast_days=7&timezone=auto";
-            JSONObject response = request(forecastUrl);
-            JSONObject current = response.getJSONObject("current");
-            int degrees = (int) Math.round(current.getDouble("temperature_2m"));
-            int code = current.getInt("weather_code");
-            String suffix = country.isEmpty() ? "" : ", " + country;
-            List<Day> days = parseDays(response.optJSONObject("daily"));
-            return new Current(city + suffix, degrees + "\u00B0", description(code), symbol(code), null, days);
-        } catch (Exception e) {
-            Log.w(TAG, "Weather lookup failed for " + place, e);
-            return Current.failure("Check TV internet");
-        }
-    }
-
-    private static List<Day> parseDays(JSONObject daily) throws Exception {
-        List<Day> days = new ArrayList<>();
-        if (daily == null) return days;
-        JSONArray dates = daily.getJSONArray("time");
-        JSONArray highs = daily.getJSONArray("temperature_2m_max");
-        JSONArray lows = daily.getJSONArray("temperature_2m_min");
-        JSONArray codes = daily.getJSONArray("weather_code");
-        SimpleDateFormat input = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-        SimpleDateFormat output = new SimpleDateFormat("EEE", Locale.getDefault());
-        for (int i = 0; i < dates.length(); i++) {
-            Date date = input.parse(dates.getString(i));
-            String day = i == 0 ? "Today" : output.format(date);
-            int code = codes.getInt(i);
-            days.add(new Day(day, symbol(code),
-                    (int) Math.round(highs.getDouble(i)), (int) Math.round(lows.getDouble(i))));
-        }
-        return days;
-    }
-
-    private static JSONObject findLocation(String place) throws Exception {
-        String cleaned = place.trim().replaceAll("(?i)[,\\s]+(united kingdom|uk|gb)$", "")
-                .replaceAll("[,\\s]+$", "").trim();
-        boolean preferUk = place.trim().matches("(?is).*(,|\\s)(united kingdom|uk|gb)$");
-        String[] words = cleaned.split("[,\\s]+");
-        // Drop trailing district words one at a time to fall back to the nearest named city.
-        for (int length = words.length; length > 0; length--) {
-            StringBuilder candidate = new StringBuilder();
-            for (int i = 0; i < length; i++) {
-                if (candidate.length() > 0) candidate.append(' ');
-                candidate.append(words[i]);
+        List<Hour> upcoming(long now) {
+            List<Hour> result = new ArrayList<>();
+            for (Hour h : hours) {
+                if (DashboardLogic.futureHour(h.time, now) && result.size() < 12) result.add(h);
             }
-            String query = URLEncoder.encode(candidate.toString(), "UTF-8");
-            JSONObject search = request("https://geocoding-api.open-meteo.com/v1/search?name="
-                    + query + "&count=10&language=en&format=json");
-            JSONArray results = search.optJSONArray("results");
-            if (results == null || results.length() == 0) continue;
-            JSONObject first = results.getJSONObject(0);
-            if (preferUk) {
-                for (int i = 0; i < results.length(); i++) {
-                    JSONObject result = results.getJSONObject(i);
-                    if ("GB".equalsIgnoreCase(result.optString("country_code", ""))) return result;
-                }
-            }
-            return first;
+            return result;
         }
-        return null;
+    }
+    static final class Cancellation {
+        private volatile HttpURLConnection connection;
+        private volatile boolean cancelled;
+        void cancel() {
+            cancelled = true;
+            HttpURLConnection c = connection;
+            if (c != null) c.disconnect();
+        }
+        void check() throws IOException {
+            if (cancelled || Thread.currentThread().isInterrupted()) throw new IOException("Cancelled");
+        }
     }
 
-    private static JSONObject request(String address) throws IOException, org.json.JSONException {
+    static Location resolve(String place, Cancellation cancellation) throws Exception {
+        String cleaned = place.trim().replaceAll("(?i)[,\\s]+(united kingdom|uk|gb)$", "");
+        boolean uk = !cleaned.equals(place.trim());
+        JSONObject search = request("https://geocoding-api.open-meteo.com/v1/search?name="
+                + URLEncoder.encode(cleaned, "UTF-8") + "&count=10&language=en&format=json", cancellation);
+        JSONArray results = search.optJSONArray("results");
+        if (results == null || results.length() == 0) throw new IOException("Town or city not found");
+        JSONObject selected = results.getJSONObject(0);
+        for (int i = 0; uk && i < results.length(); i++) {
+            if ("GB".equals(results.getJSONObject(i).optString("country_code"))) {
+                selected = results.getJSONObject(i); break;
+            }
+        }
+        String name = selected.getString("name");
+        String country = selected.optString("country_code", "");
+        return new Location(name + (country.isEmpty() ? "" : ", " + country),
+                selected.getDouble("latitude"), selected.getDouble("longitude"),
+                selected.optString("timezone", "UTC"));
+    }
+
+    static JSONObject fetch(Location location, String units, Cancellation cancellation) throws Exception {
+        return request("https://api.open-meteo.com/v1/forecast?latitude=" + location.latitude
+                + "&longitude=" + location.longitude
+                + "&current=temperature_2m,apparent_temperature,weather_code,is_day"
+                + "&hourly=temperature_2m,weather_code,is_day"
+                + "&daily=temperature_2m_max,temperature_2m_min"
+                + "&temperature_unit=" + units + "&timezone=auto&timeformat=unixtime&forecast_days=3", cancellation);
+    }
+
+    static Current parse(JSONObject body, Location location, long timestamp) throws Exception {
+        JSONObject current = body.getJSONObject("current"), hourly = body.getJSONObject("hourly");
+        JSONObject daily = body.getJSONObject("daily");
+        Location resolved = new Location(location.name, location.latitude, location.longitude,
+                body.optString("timezone", location.zone));
+        JSONArray times = hourly.getJSONArray("time"), temps = hourly.getJSONArray("temperature_2m");
+        JSONArray codes = hourly.getJSONArray("weather_code"), daylight = hourly.getJSONArray("is_day");
+        List<Hour> hours = new ArrayList<>();
+        for (int i = 0; i < times.length(); i++) {
+            if (times.isNull(i) || temps.isNull(i) || codes.isNull(i)) continue;
+            hours.add(new Hour(times.getLong(i) * 1000L, (int) Math.round(temps.getDouble(i)),
+                    codes.getInt(i), daylight.optInt(i, 1) == 1));
+        }
+        return new Current(resolved, (int) Math.round(current.getDouble("temperature_2m")),
+                (int) Math.round(current.getDouble("apparent_temperature")),
+                (int) Math.round(daily.getJSONArray("temperature_2m_max").getDouble(0)),
+                (int) Math.round(daily.getJSONArray("temperature_2m_min").getDouble(0)),
+                current.getInt("weather_code"), current.optInt("is_day", 1) == 1, timestamp, hours);
+    }
+
+    private static JSONObject request(String address, Cancellation cancellation) throws Exception {
+        cancellation.check();
         HttpURLConnection c = (HttpURLConnection) new URL(address).openConnection();
-        c.setConnectTimeout(12000);
-        c.setReadTimeout(12000);
-        c.setRequestProperty("User-Agent", "dumbtv-home");
+        cancellation.connection = c;
+        c.setConnectTimeout(10000); c.setReadTimeout(10000);
+        c.setRequestProperty("User-Agent", "HomeTogether/1.0 personal-dashboard");
         try {
-            int status = c.getResponseCode();
-            if (status < 200 || status >= 300) throw new IOException("HTTP " + status);
-            try (InputStream in = c.getInputStream();
-                 BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
-                StringBuilder body = new StringBuilder();
-                for (String line; (line = reader.readLine()) != null;) body.append(line);
-                return new JSONObject(body.toString());
+            cancellation.check();
+            if (c.getResponseCode() / 100 != 2) throw new IOException("Weather service unavailable");
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8))) {
+                StringBuilder out = new StringBuilder();
+                for (String line; (line = r.readLine()) != null;) { cancellation.check(); out.append(line); }
+                return new JSONObject(out.toString());
             }
-        } finally {
-            c.disconnect();
-        }
+        } finally { c.disconnect(); cancellation.connection = null; }
     }
 
-    private static String symbol(int code) {
-        if (code == 0) return "\u2600";
-        if (code <= 3) return "\u2601";
-        if (code == 45 || code == 48) return "\u224B";
-        if (code >= 51 && code <= 67) return "\u2602";
-        if (code >= 71 && code <= 77 || code == 85 || code == 86) return "\u2744";
-        if (code >= 80 && code <= 82) return "\u2602";
-        if (code >= 95) return "\u26A1";
-        return "\u25CC";
-    }
-
-    private static String description(int code) {
-        if (code == 0) return "Clear skies";
-        if (code == 1) return "Mostly clear";
+    static String description(int code) {
+        if (code == 0) return "Clear sky";
+        if (code == 1) return "Mainly clear";
         if (code == 2) return "Partly cloudy";
         if (code == 3) return "Overcast";
         if (code == 45 || code == 48) return "Fog";
-        if (code == 51 || code == 53 || code == 55 || code == 56 || code == 57) return "Drizzle";
-        if (code == 61 || code == 63 || code == 65 || code == 66 || code == 67) return "Rain";
-        if (code == 71 || code == 73 || code == 75 || code == 77) return "Snow";
-        if (code == 80 || code == 81 || code == 82) return "Rain showers";
-        if (code == 85 || code == 86) return "Snow showers";
-        if (code == 95 || code == 96 || code == 99) return "Thunderstorms";
-        return "Current conditions";
+        if (code >= 51 && code <= 57) return "Drizzle";
+        if (code >= 61 && code <= 67) return "Rain";
+        if (code >= 71 && code <= 77 || code == 85 || code == 86) return "Snow";
+        if (code >= 80 && code <= 82) return "Rain showers";
+        if (code >= 95 && code <= 99) return "Thunderstorm";
+        return "Unavailable";
     }
 }

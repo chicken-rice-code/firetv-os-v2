@@ -32,7 +32,7 @@ import java.util.TimeZone;
  */
 final class Config {
     static final String FILE = "home.conf";
-    static final String DEFAULT_WEATHER_LOCATION = "Plymouth, UK";
+    static final String DEFAULT_WEATHER_LOCATION = "";
 
     static final class Choice {
         final String key, title;
@@ -62,19 +62,21 @@ final class Config {
     static final Choice LAYOUT = new Choice("layout", "Layout", "rows",
             new String[] {"rows", "grid"},
             new String[] {"Rows", "Grid"});
-    static final Choice LABELS = new Choice("labels", "App names", "never",
-            new String[] {"never", "always"},
-            new String[] {"Never", "Always"});
+    static final Choice LABELS = new Choice("labels", "App names", "always",
+            new String[] {"always", "focus", "never"},
+            new String[] {"Always", "On focus", "Never"});
     static final Choice CLOCK = new Choice("clock", "Clock", "auto",
             new String[] {"auto", "24h", "12h"},
             new String[] {"System", "24-hour", "12-hour"});
+    static final Choice UNITS = new Choice("weather.units", "Temperature units", "celsius",
+            new String[] {"celsius", "fahrenheit"}, new String[] {"Celsius", "Fahrenheit"});
     static final Choice INPUTS = new Choice("inputs", "Inputs row", "on",
             new String[] {"on", "off"},
             new String[] {"Shown", "Hidden"});
     static final Choice SWITCH = new Choice("switch", "Open inputs with", "auto",
             new String[] {"auto", "tv", "home"},
             new String[] {"Automatic", "The TV's app", "dumbtv home"});
-    static final Choice BACKGROUND = new Choice("background", "Background", "gradient",
+    static final Choice BACKGROUND = new Choice("background", "Background", "black",
             new String[] {"black", "graphite", "midnight", "gradient", "image", "adaptive", "adaptive-tint"},
             new String[] {"Black", "Graphite", "Midnight", "Gradient", "Image file", "Adaptive solid", "Adaptive wallpaper tint"});
     static final Choice GRADIENT = new Choice("gradient", "Gradient style", "ocean",
@@ -91,7 +93,7 @@ final class Config {
             new String[] {"off", "visit", "hourly", "daily", "daytime"},
             new String[] {"Off", "Every return home", "Every hour", "Every day", "By time of day"});
 
-    static final Choice[] CHOICES = {ACCENT, TILES, LAYOUT, LABELS, CLOCK, INPUTS, SWITCH,
+    static final Choice[] CHOICES = {ACCENT, TILES, LAYOUT, LABELS, CLOCK, UNITS, INPUTS, SWITCH,
             BACKGROUND, GRADIENT, GRADIENT_DIRECTION, DIM, ROTATE};
 
     /** Folder of wallpapers, next to home.conf, that Background › Image file rotates through. */
@@ -181,6 +183,17 @@ final class Config {
         String value = values.get("weather.location");
         if (value == null) return DEFAULT_WEATHER_LOCATION;
         return "off".equalsIgnoreCase(value) ? "" : value;
+    }
+
+    void resolvedWeather(String query, Weather.Location location) {
+        if (!query.equals(weatherLocation())) return;
+        values.put("weather.resolved", query);
+        values.put("weather.city", location.name);
+        values.put("weather.latitude", "" + location.latitude);
+        values.put("weather.longitude", "" + location.longitude);
+        values.put("weather.timezone", location.zone);
+        version++;
+        save();
     }
 
     void set(String key, String value) {

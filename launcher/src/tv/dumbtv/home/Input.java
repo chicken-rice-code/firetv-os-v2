@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputManager;
@@ -118,14 +117,14 @@ public final class Input extends Activity {
         status.setVisibility(View.GONE);
         status.setGravity(Gravity.CENTER);
         status.setPadding(dp(Ui.SPACE_XL), dp(Ui.SPACE_LG), dp(Ui.SPACE_XL), dp(Ui.SPACE_LG));
-        status.setBackground(inputGlass());
+        status.setBackground(Ui.glass(this, dp(Ui.CARD_RADIUS)));
         status.setElevation(dp(8));
         root.addView(status, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER));
 
         name = Ui.text(this, 20, Ui.TEXT, Ui.MEDIUM);
         name.setText(getIntent().getCharSequenceExtra(EXTRA_NAME));
         name.setPadding(dp(Ui.SPACE_XL), dp(Ui.SPACE_SM), dp(Ui.SPACE_XL), dp(Ui.SPACE_SM));
-        name.setBackground(inputGlass());
+        name.setBackground(Ui.glass(this, dp(Ui.CARD_RADIUS)));
         name.setElevation(dp(6));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START);
         lp.setMargins(dp(Ui.PAGE_GUTTER), dp(Ui.PAGE_GUTTER), 0, 0);
@@ -205,14 +204,6 @@ public final class Input extends Activity {
             status.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(240)
                     .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
         }
-    }
-
-    private GradientDrawable inputGlass() {
-        GradientDrawable panel = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {0xD9262C38, 0xC912151D});
-        panel.setCornerRadius(dp(16));
-        panel.setStroke(dp(1), 0x66FFFFFF);
-        return panel;
     }
 
     private int dp(float v) {
