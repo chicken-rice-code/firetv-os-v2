@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.TypedValue;
@@ -35,15 +36,8 @@ final class Ui {
         return Math.round(v * c.getResources().getDisplayMetrics().density);
     }
 
-    static GradientDrawable gradient(int[] colors, String direction) {
-        GradientDrawable.Orientation orientation;
-        switch (direction) {
-            case "reverse": orientation = GradientDrawable.Orientation.TR_BL; break;
-            case "vertical": orientation = GradientDrawable.Orientation.TOP_BOTTOM; break;
-            case "horizontal": orientation = GradientDrawable.Orientation.LEFT_RIGHT; break;
-            default: orientation = GradientDrawable.Orientation.TL_BR;
-        }
-        return new GradientDrawable(orientation, colors);
+    static Drawable gradient(int[] colors, String direction) {
+        return new GradientBackground(colors, direction);
     }
     static GradientDrawable menuSurface(Context c, float radius) {
         GradientDrawable d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
