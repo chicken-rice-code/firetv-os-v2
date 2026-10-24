@@ -1,6 +1,5 @@
 package tv.dumbtv.home;
 
-import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
@@ -17,6 +16,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.provider.Settings;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -32,12 +32,14 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -57,18 +59,23 @@ public final class Home extends Activity {
     private Config cfg;
     private TvInputManager tv;
     private int applied = -1, appsGeneration;
-    private boolean resumed, landed;
+    private boolean resumed, landed, catalogReady;
     private FrameLayout root;
     private ImageView wall;
+
     private View shade;
     private View tint;
-    private TextView clock, date;
+    private TextView greeting, socks, clock, date, weatherIcon, weatherTemp, weatherCondition, weatherPlace;
+    private TextView menuButton, loadingStatus;
+    private PopupWindow homeMenu;
+    private LinearLayout weather, forecastPanel, forecastRow;
+    private TextView forecastHint, forecastTitle;
+    private Weather.Current weatherData;
     private Row apps, inputs;
     private Tile moving;
     private String wallKey;
     private String backgroundMode;
-    private ValueAnimator colorAnimation;
-    private int displayedColor, targetColor;
+    private int targetColor;
     private boolean tintWallpaper;
 
     private final BroadcastReceiver packages = new BroadcastReceiver() {
@@ -118,15 +125,15 @@ public final class Home extends Activity {
 
         Row(String kind, String name, LinearLayout parent) {
             this.kind = kind;
-            int edge = dp(56), bleed = dp(14);
-            title = Ui.text(Home.this, 12, Ui.FAINT, Ui.MEDIUM);
+            int edge = dp(Ui.PAGE_GUTTER), bleed = dp(Ui.SPACE_SM);
+            title = Ui.text(Home.this, 12, Ui.MUTED, Ui.MEDIUM);
             title.setText(name.toUpperCase(Locale.ROOT));
             title.setLetterSpacing(0.14f);
-            title.setPadding(edge, dp(20), edge, dp(2));
+            title.setPadding(edge, dp(Ui.SPACE_LG), edge, 0);
             strip = new LinearLayout(Home.this);
             strip.setClipChildren(false);
             strip.setClipToPadding(false);
-            strip.setPadding(bleed, dp(12), bleed, dp(8));
+            strip.setPadding(bleed, dp(Ui.SPACE_SM), bleed, dp(Ui.SPACE_XS));
             scroll = new HorizontalScrollView(Home.this) {
                 /** Keeps the focused tile centered, except near either end of the row. */
                 @Override
@@ -145,7 +152,7 @@ public final class Home extends Activity {
             scroll.setPadding(edge - bleed, 0, edge - bleed, 0);
             scroll.addView(strip, new FrameLayout.LayoutParams(WRAP, WRAP));
             grid = new Grid(Home.this);
-            grid.setPadding(edge, dp(12), edge, dp(8));
+            grid.setPadding(edge, dp(Ui.SPACE_SM), edge, dp(Ui.SPACE_XS));
             parent.addView(title, new LinearLayout.LayoutParams(MATCH, WRAP));
             parent.addView(scroll, new LinearLayout.LayoutParams(MATCH, WRAP));
             parent.addView(grid, new LinearLayout.LayoutParams(MATCH, WRAP));
@@ -184,31 +191,34 @@ public final class Home extends Activity {
         loadInputs();
     }
 
-    /**
-     * Waits for the app list and loads the art of the tiles that fit on screen, so the first
-     * frame is complete. After a cold start that frame is what people see first: loading in the
-     * background drew the Inputs row alone, focused HDMI 1 for ~0.3 s, then popped the apps and
-     * their banners in.
-     */
+    /** Loads the catalogue and first-screen artwork off the UI thread before showing the tiles. */
     private void firstApps(Future<List<Item>> catalog) {
-        try {
-            apps.all = catalog.get();
-        } catch (ExecutionException e) {
-            loadApps(null);
-            return;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            loadApps(null);
-            return;
-        }
-        int fit = getResources().getDisplayMetrics().widthPixels / (cardSize()[0] + dp(18)) + 1;
-        for (Item it : Catalog.visible(cfg, Catalog.APPS, apps.all)) {
-            if (fit-- <= 0) break;
-            Catalog.art(getPackageManager(), it);
-            it.artRequested = true;
-        }
+        io.execute(() -> {
+            List<Item> initial;
+            try {
+                initial = catalog.get();
+            } catch (ExecutionException e) {
+                Log.w("dumbtv", "could not load the app list", e);
+                initial = new ArrayList<>();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                initial = new ArrayList<>();
+            }
+            int fit = getResources().getDisplayMetrics().widthPixels / Ui.dp(this, 178) + 1;
+            for (Item it : initial) {
+                if (fit-- <= 0) break;
+                Catalog.art(getPackageManager(), it);
+                it.artRequested = true;
+            }
+            List<Item> ready = initial;
+            ui.post(() -> {
+                if (isDestroyed()) return;
+                apps.all = ready;
+                catalogReady = true;
+                render(apps);
+            });
+        });
     }
-
     @Override
     protected void onResume() {
         super.onResume();
@@ -234,7 +244,6 @@ public final class Home extends Activity {
     protected void onPause() {
         super.onPause();
         resumed = false;
-        stopColorAnimation();
         targetColor = 0;
         unregisterReceiver(time);
         if (moving != null) stopMoving();
@@ -248,7 +257,6 @@ public final class Home extends Activity {
         colorIo.shutdownNow();
         super.onDestroy();
     }
-
     /**
      * Android 9 keeps a hidden window's GPU context (about 35 MB on this TV) unless memory is
      * critical. Dropping it while an app plays costs one context rebuild on the way back.
@@ -309,7 +317,7 @@ public final class Home extends Activity {
         if (code == KeyEvent.KEYCODE_MENU) {
             View f = getCurrentFocus();
             if (f instanceof Tile) menu((Tile) f);
-            else startActivity(new Intent(this, Options.class));
+            else openHomeMenu();
             return true;
         }
         return super.onKeyDown(code, e);
@@ -371,7 +379,8 @@ public final class Home extends Activity {
     private void fitBottom(ScrollView page) {
         View content = page.getChildAt(0);
         if (content == null || page.getHeight() == 0) return;
-        int base = dp(32), height = page.getHeight();
+        int base = dp(18), height = page.getHeight();
+
         int natural = content.getHeight() - content.getPaddingBottom() + base;
         int want = base;
         if (natural > height) {
@@ -395,18 +404,146 @@ public final class Home extends Activity {
         return y;
     }
 
+    /** Returns the focusable tile horizontally closest to a header control. */
+    private static View nearest(ViewGroup tiles, View from) {
+        if (tiles == null || from == null) return null;
+        int[] source = new int[2];
+        from.getLocationOnScreen(source);
+        int center = source[0] + from.getWidth() / 2;
+        View best = null;
+        long bestDistance = Long.MAX_VALUE;
+        int[] location = new int[2];
+        for (int i = 0; i < tiles.getChildCount(); i++) {
+            View child = tiles.getChildAt(i);
+            if (!child.isFocusable() || !child.isShown()) continue;
+            child.getLocationOnScreen(location);
+            long distance = Math.abs((long) center - (location[0] + child.getWidth() / 2));
+            if (distance < bestDistance) {
+                best = child;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
     private View build() {
         root = new FrameLayout(this);
         wall = new ImageView(this);
         wall.setScaleType(ImageView.ScaleType.CENTER_CROP);
         root.addView(wall, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+
         shade = new View(this);
         root.addView(shade, new FrameLayout.LayoutParams(MATCH, MATCH));
         tint = new View(this);
         root.addView(tint, new FrameLayout.LayoutParams(MATCH, MATCH));
 
+        LinearLayout shell = new LinearLayout(this) {
+            @Override
+            public View focusSearch(View focused, int direction) {
+                if (direction == View.FOCUS_DOWN && (chips.contains(focused) || focused == weather)) {
+                    View below = nearest(apps.tiles(), focused);
+                    if (below != null && below.isFocusable()) return below;
+                }
+                return super.focusSearch(focused, direction);
+            }
+        };
+        shell.setOrientation(LinearLayout.VERTICAL);
+        shell.setClipChildren(false);
+        shell.setClipToPadding(false);
+        root.addView(shell, new FrameLayout.LayoutParams(MATCH, MATCH));
+
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(Ui.PAGE_GUTTER), dp(Ui.SPACE_LG), dp(Ui.PAGE_GUTTER), dp(Ui.SPACE_LG));
+        LinearLayout welcomeBlock = new LinearLayout(this);
+        welcomeBlock.setOrientation(LinearLayout.HORIZONTAL);
+        welcomeBlock.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout dateTime = new LinearLayout(this);
+        dateTime.setOrientation(LinearLayout.VERTICAL);
+        dateTime.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        clock = Ui.text(this, 27, Ui.TEXT, Ui.MEDIUM);
+        clock.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        date = Ui.text(this, 12, Ui.MUTED, Ui.REGULAR);
+        date.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        dateTime.addView(clock);
+        dateTime.addView(date);
+        welcomeBlock.addView(dateTime, new LinearLayout.LayoutParams(WRAP, WRAP));
+
+        View dateDivider = new View(this);
+        dateDivider.setBackgroundColor(0x45FFFFFF);
+        LinearLayout.LayoutParams dateDividerLp = new LinearLayout.LayoutParams(dp(1), dp(42));
+        dateDividerLp.leftMargin = dp(Ui.SPACE_MD);
+        dateDividerLp.rightMargin = dp(Ui.SPACE_MD);
+        welcomeBlock.addView(dateDivider, dateDividerLp);
+
+        LinearLayout when = new LinearLayout(this);
+        when.setOrientation(LinearLayout.VERTICAL);
+        greeting = Ui.text(this, 27, Ui.TEXT, Ui.MEDIUM);
+        socks = Ui.text(this, 12, Ui.MUTED, Ui.REGULAR);
+        when.addView(greeting);
+        when.addView(socks);
+        welcomeBlock.addView(when, new LinearLayout.LayoutParams(WRAP, WRAP));
+        head.addView(welcomeBlock, new LinearLayout.LayoutParams(WRAP, WRAP));
+        head.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+
+        weather = new LinearLayout(this);
+        weather.setOrientation(LinearLayout.HORIZONTAL);
+        weather.setGravity(Gravity.CENTER_VERTICAL);
+        weather.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_SM), dp(Ui.SPACE_MD), dp(Ui.SPACE_SM));
+        weather.setBackground(Ui.glass(this, dp(15)));
+        weather.setFocusable(true);
+        weather.setClickable(true);
+        weather.setContentDescription("Weather. Select for the seven-day forecast");
+        weather.setOnClickListener(v -> toggleForecast());
+        weather.setOnFocusChangeListener((v, focused) -> styleWeather(focused || weather.isHovered()));
+        weather.setOnHoverListener((v, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_HOVER_ENTER
+                    || event.getActionMasked() == android.view.MotionEvent.ACTION_HOVER_EXIT) {
+                styleWeather(weather.isFocused() || event.getActionMasked() == android.view.MotionEvent.ACTION_HOVER_ENTER);
+            }
+            return false;
+        });
+        weatherIcon = Ui.text(this, 27, Ui.TEXT, Ui.MEDIUM);
+        weatherIcon.setGravity(Gravity.CENTER);
+        weather.addView(weatherIcon, new LinearLayout.LayoutParams(dp(36), MATCH));
+        LinearLayout wxCopy = new LinearLayout(this);
+        wxCopy.setOrientation(LinearLayout.VERTICAL);
+        wxCopy.setGravity(Gravity.CENTER_VERTICAL);
+        wxCopy.setPadding(dp(Ui.SPACE_SM), 0, dp(Ui.SPACE_SM), 0);
+        weatherPlace = Ui.text(this, 9, Ui.MUTED, Ui.MEDIUM);
+        weatherPlace.setLetterSpacing(0.05f);
+        weatherCondition = Ui.text(this, 12, Ui.TEXT, Ui.MEDIUM);
+        wxCopy.addView(weatherPlace);
+        wxCopy.addView(weatherCondition);
+        weather.addView(wxCopy, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        weatherTemp = Ui.text(this, 21, Ui.TEXT, Ui.LIGHT);
+        weatherTemp.setGravity(Gravity.CENTER_VERTICAL);
+        weather.addView(weatherTemp);
+        LinearLayout.LayoutParams weatherLp = new LinearLayout.LayoutParams(dp(220), dp(60));
+        weatherLp.rightMargin = dp(Ui.SPACE_XS);
+        head.addView(weather, weatherLp);
+        menuButton = chip("\u2630  Menu", v -> openHomeMenu());
+        menuButton.setContentDescription("Options and TV settings");
+        menuButton.setOnKeyListener((v, code, event) -> {
+            boolean select = code == KeyEvent.KEYCODE_DPAD_CENTER
+                    || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
+            if (!select) return false;
+            if (event.getAction() == KeyEvent.ACTION_UP) openHomeMenu();
+            return true;
+        });
+        head.addView(menuButton);
+        shell.addView(head, new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        View divider = new View(this);
+        divider.setBackgroundColor(0x20FFFFFF);
+        LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(MATCH, dp(1));
+        dividerLp.leftMargin = dp(Ui.PAGE_GUTTER);
+        dividerLp.rightMargin = dp(Ui.PAGE_GUTTER);
+        shell.addView(divider, dividerLp);
+
         ScrollView scroll = new ScrollView(this) {
-            /** Scrolls in whole rows: the focused row shows complete, and a row starts at the top edge. */
             @Override
             protected int computeScrollDeltaToGetChildRectOnScreen(Rect r) {
                 return rowTarget(this, r) - getScrollY();
@@ -418,10 +555,6 @@ public final class Home extends Activity {
                 fitBottom(this);
             }
 
-            /**
-             * Up and down only move the focus; scrolling follows it. Left to ScrollView, a press
-             * with nothing focusable that way scrolls half a screen and leaves rows cut.
-             */
             @Override
             public boolean executeKeyEvent(KeyEvent e) {
                 switch (e.getKeyCode()) {
@@ -441,96 +574,72 @@ public final class Home extends Activity {
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.setClipChildren(false);
-        root.addView(scroll, new FrameLayout.LayoutParams(MATCH, MATCH));
+        shell.addView(scroll, new LinearLayout.LayoutParams(MATCH, 0, 1f));
 
-        LinearLayout column = new LinearLayout(this) {
-            @Override
-            public View focusSearch(View focused, int direction) {
-                if (direction == View.FOCUS_DOWN && chips.contains(focused)) {
-                    View below = nearest(apps.tiles(), focused);
-                    if (below != null) return below;
-                }
-                return super.focusSearch(focused, direction);
-            }
-        };
+        LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setClipChildren(false);
         column.setClipToPadding(false);
-        column.setPadding(0, dp(40), 0, dp(32));
+        column.setPadding(0, dp(Ui.SPACE_XS), 0, dp(Ui.SPACE_XL));
         scroll.addView(column, new FrameLayout.LayoutParams(MATCH, WRAP));
 
-        LinearLayout head = new LinearLayout(this);
-        head.setGravity(Gravity.TOP);
-        head.setPadding(dp(56), 0, dp(56), dp(12));
-        LinearLayout when = new LinearLayout(this);
-        when.setOrientation(LinearLayout.VERTICAL);
-        clock = Ui.text(this, 52, Ui.TEXT, Ui.LIGHT);
-        date = Ui.text(this, 15, Ui.MUTED, Ui.MEDIUM);
-        date.setPadding(dp(2), dp(8), 0, 0);
-        when.addView(clock);
-        when.addView(date);
-        head.addView(when, new LinearLayout.LayoutParams(0, WRAP, 1f));
-        head.addView(chip("Options", v -> startActivity(new Intent(this, Options.class))));
-        head.addView(chip("Settings", v -> openSettings()));
-        column.addView(head, new LinearLayout.LayoutParams(MATCH, WRAP));
+        forecastPanel = new LinearLayout(this);
+        forecastPanel.setOrientation(LinearLayout.VERTICAL);
+        forecastPanel.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_SM), dp(Ui.SPACE_MD), dp(Ui.SPACE_SM));
+        forecastPanel.setBackground(Ui.glass(this, dp(16)));
+        forecastTitle = Ui.text(this, 11, Ui.MUTED, Ui.MEDIUM);
+        forecastTitle.setLetterSpacing(0.12f);
+        forecastTitle.setText("THE WEEK AHEAD");
+        forecastTitle.setPadding(dp(Ui.SPACE_XS), 0, 0, dp(Ui.SPACE_XS));
+        forecastPanel.addView(forecastTitle);
+        forecastHint = Ui.text(this, 13, Ui.MUTED, Ui.REGULAR);
+        forecastHint.setText("Select the weather card to load the week ahead");
+        forecastPanel.addView(forecastHint);
+        forecastRow = new LinearLayout(this);
+        forecastRow.setOrientation(LinearLayout.HORIZONTAL);
+        forecastPanel.addView(forecastRow, new LinearLayout.LayoutParams(MATCH, WRAP));
+        forecastPanel.setVisibility(View.GONE);
+        LinearLayout.LayoutParams forecastLp = new LinearLayout.LayoutParams(MATCH, WRAP);
+        forecastLp.setMargins(dp(Ui.PAGE_GUTTER), dp(Ui.SPACE_XS), dp(Ui.PAGE_GUTTER), dp(Ui.SPACE_SM));
+        column.addView(forecastPanel, forecastLp);
 
-        apps = new Row(Catalog.APPS, "Apps", column);
-        inputs = new Row(Catalog.INPUTS, "Inputs", column);
+        loadingStatus = Ui.text(this, 14, Ui.MUTED, Ui.REGULAR);
+        loadingStatus.setText("Loading apps\u2026");
+        loadingStatus.setPadding(dp(Ui.PAGE_GUTTER), dp(Ui.SPACE_LG), dp(Ui.PAGE_GUTTER), dp(Ui.SPACE_XS));
+        column.addView(loadingStatus, new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        apps = new Row(Catalog.APPS, "APPS", column);
+        inputs = new Row(Catalog.INPUTS, "INPUTS", column);
+        apps.title.setVisibility(View.VISIBLE);
+        apps.scroll.setVisibility("grid".equals(cfg.get(Config.LAYOUT)) ? View.GONE : View.VISIBLE);
+        apps.grid.setVisibility("grid".equals(cfg.get(Config.LAYOUT)) ? View.VISIBLE : View.GONE);
+        inputs.setVisible(true);
         return root;
     }
 
-    /**
-     * The child of {@code strip} horizontally closest to {@code from}, restricted to its top
-     * visual row so a wrapped grid does not match a tile several rows further down.
-     */
-    private static View nearest(ViewGroup strip, View from) {
-        int n = strip.getChildCount();
-        if (n == 0) return null;
-        int[] at = new int[2];
-        from.getLocationOnScreen(at);
-        int x = at[0] + from.getWidth() / 2;
-        int[] ys = new int[n];
-        int topY = Integer.MAX_VALUE;
-        for (int i = 0; i < n; i++) {
-            strip.getChildAt(i).getLocationOnScreen(at);
-            ys[i] = at[1];
-            topY = Math.min(topY, at[1]);
-        }
-        View best = null;
-        int bestGap = Integer.MAX_VALUE;
-        for (int i = 0; i < n; i++) {
-            if (ys[i] != topY) continue;
-            View c = strip.getChildAt(i);
-            c.getLocationOnScreen(at);
-            int gap = Math.abs(at[0] + c.getWidth() / 2 - x);
-            if (gap < bestGap) {
-                bestGap = gap;
-                best = c;
-            }
-        }
-        return best;
+    private void styleWeather(boolean active) {
+        weather.setBackground(active
+                ? Ui.glassOutline(this, dp(15), cfg.accent())
+                : Ui.glass(this, dp(15)));
     }
 
     private TextView chip(String label, View.OnClickListener click) {
-        TextView v = Ui.text(this, 14, Ui.TEXT, Ui.MEDIUM);
+        TextView v = Ui.text(this, 13, Ui.TEXT, Ui.MEDIUM);
         v.setText(label);
         v.setGravity(Gravity.CENTER);
-        v.setPadding(dp(18), dp(9), dp(18), dp(9));
+        v.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_SM), dp(Ui.SPACE_MD), dp(Ui.SPACE_SM));
         v.setFocusable(true);
         v.setClickable(true);
         v.setOnClickListener(click);
         v.setOnFocusChangeListener((view, has) -> {
-            view.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(110).start();
             if (has) focusBackground(null);
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-        lp.leftMargin = dp(10);
-        lp.topMargin = dp(6);
+        lp.leftMargin = dp(Ui.SPACE_SM);
         v.setLayoutParams(lp);
         chips.add(v);
         return v;
     }
-
     private void apply() {
         applied = cfg.version();
         int accent = cfg.accent();
@@ -570,6 +679,8 @@ public final class Home extends Activity {
     }
 
     private void render(Row row) {
+        if (row == apps && !catalogReady) return;
+        if (row == apps && loadingStatus != null) loadingStatus.setVisibility(View.GONE);
         if (moving != null && moving.kind.equals(row.kind)) stopMoving();
         View focused = getCurrentFocus();
         String keep = focused instanceof Tile && ((Tile) focused).kind.equals(row.kind)
@@ -581,6 +692,7 @@ public final class Home extends Activity {
 
         boolean enabled = !Catalog.INPUTS.equals(row.kind) || "on".equals(cfg.get(Config.INPUTS));
         List<Item> shown = enabled ? Catalog.visible(cfg, row.kind, row.all) : new ArrayList<>();
+        row.title.setText(Catalog.APPS.equals(row.kind) ? "APPS" : "INPUTS");
         int[] size = cardSize();
         int w = size[0], h = Catalog.APPS.equals(row.kind) ? size[1] : Math.round(size[1] * 0.56f);
         String labels = cfg.get(Config.LABELS);
@@ -600,7 +712,7 @@ public final class Home extends Activity {
                 target.addView(t, new ViewGroup.LayoutParams(WRAP, WRAP));
             } else {
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(WRAP, WRAP);
-                lp.rightMargin = dp(18);
+                lp.rightMargin = index + 1 < shown.size() ? dp(Ui.SPACE_SM) : 0;
                 target.addView(t, lp);
             }
             if (it.id.equals(keep)) restore = index;
@@ -628,7 +740,6 @@ public final class Home extends Activity {
             });
         });
     }
-
     private Item focusedItem() {
         View focused = getCurrentFocus();
         return focused instanceof Tile ? ((Tile) focused).item : null;
@@ -636,7 +747,7 @@ public final class Home extends Activity {
 
     private void focusBackground(Item it) {
         String mode = cfg.get(Config.BACKGROUND);
-        if (!resumed || !"adaptive".equals(mode) && !"adaptive-tint".equals(mode)) return;
+        if (!resumed || !("adaptive".equals(mode) || "adaptive-tint".equals(mode))) return;
         if ("adaptive-tint".equals(mode) && !tintWallpaper) return;
         if (it != null && it.info != null && it.backgroundColor == 0 && !it.colorRequested
                 && (it.banner != null || it.icon != null)) {
@@ -653,49 +764,30 @@ public final class Home extends Activity {
         if ("adaptive-tint".equals(mode)) color = FocusColor.tint(color);
         if (color == targetColor) return;
         targetColor = color;
-        stopColorAnimation();
-        if (Settings.Global.getFloat(getContentResolver(), "animator_duration_scale", 1f) == 0f) {
-            setAdaptiveColor(color);
-            return;
-        }
-        colorAnimation = ValueAnimator.ofArgb(displayedColor, color);
-        colorAnimation.setDuration(250);
-        colorAnimation.addUpdateListener(a -> setAdaptiveColor((Integer) a.getAnimatedValue()));
-        colorAnimation.start();
-    }
-
-    private void setAdaptiveColor(int color) {
-        displayedColor = color;
         if ("adaptive-tint".equals(backgroundMode)) tint.setBackgroundColor(color);
         else root.setBackgroundColor(color);
-    }
-
-    private void stopColorAnimation() {
-        if (colorAnimation != null) {
-            colorAnimation.cancel();
-            colorAnimation = null;
-        }
     }
 
     private int[] cardSize() {
         switch (cfg.get(Config.TILES)) {
             case "small":
-                return new int[] {dp(144), dp(81)};
+                return new int[] {dp(128), dp(72)};
             case "large":
-                return new int[] {dp(224), dp(126)};
+                return new int[] {dp(190), dp(107)};
             default:
-                return new int[] {dp(180), dp(101)};
+                return new int[] {dp(158), dp(89)};
         }
     }
 
     private void focusFirst() {
+        if (!catalogReady) return;
         apps.scroll.scrollTo(0, 0);
         inputs.scroll.scrollTo(0, 0);
         View first = apps.tiles().getChildAt(0);
         if (first == null) first = inputs.tiles().getChildAt(0);
         landed = apps.tiles().getChildCount() > 0;
-        if (first == null) first = chips.get(0);
-        first.requestFocus();
+        if (first == null && !chips.isEmpty()) first = chips.get(0);
+        if (first != null) first.requestFocus();
     }
 
     private void tick() {
@@ -712,8 +804,128 @@ public final class Home extends Activity {
         }
         Locale locale = Locale.getDefault();
         date.setText(DateFormat.format(DateFormat.getBestDateTimePattern(locale, "EEEEdMMMM"), now));
+        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        String timeOfDay = hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 17 ? "afternoon" : "evening";
+        greeting.setText("Good " + timeOfDay + ", Lizzie & Jimmi");
+        socks.setText("(and Socks) \uD83D\uDC15");
+        refreshWeather();
         // hourly and time-of-day rotations change while the screen stays open; a no-op otherwise
         background();
+    }
+
+
+    private String weatherLocation;
+    private long weatherUpdated;
+    private boolean weatherLoading;
+
+    private void toggleForecast() {
+        boolean show = forecastPanel.getVisibility() != View.VISIBLE;
+        weather.setContentDescription(show
+                ? "Weather. Select to hide the seven-day forecast"
+                : "Weather. Select for the seven-day forecast");
+        forecastPanel.animate().cancel();
+        if (show) {
+            forecastPanel.setVisibility(View.VISIBLE);
+            forecastPanel.setAlpha(0f);
+            forecastPanel.animate().alpha(1f).setDuration(120).start();
+            if (weatherData != null) renderForecast(weatherData);
+            else {
+                forecastHint.setText("Loading the week ahead\u2026");
+                refreshWeather();
+            }
+        } else {
+            forecastPanel.animate().alpha(0f).setDuration(100)
+                    .withEndAction(() -> {
+                        forecastPanel.setVisibility(View.GONE);
+                        forecastPanel.setAlpha(1f);
+                    }).start();
+        }
+    }
+
+    private void renderForecast(Weather.Current data) {
+        forecastRow.removeAllViews();
+        if (data.error != null || data.days.isEmpty()) {
+            forecastTitle.setText("THE WEEK AHEAD");
+            forecastHint.setVisibility(View.VISIBLE);
+            forecastHint.setText(data.error == null ? "Forecast unavailable" : data.error);
+            return;
+        }
+        forecastTitle.setText("THE WEEK AHEAD   \u00B7   " + data.place.toUpperCase(Locale.getDefault()));
+        forecastHint.setVisibility(View.GONE);
+        for (int i = 0; i < data.days.size(); i++) {
+            Weather.Day day = data.days.get(i);
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setGravity(Gravity.CENTER);
+            card.setPadding(dp(Ui.SPACE_SM), dp(Ui.SPACE_XS), dp(Ui.SPACE_SM), dp(Ui.SPACE_XS));
+            card.setBackground("Today".equals(day.name)
+                    ? Ui.glassOutline(this, dp(11), cfg.accent()) : Ui.glass(this, dp(11)));
+            TextView name = Ui.text(this, 11, Ui.TEXT, Ui.MEDIUM);
+            name.setGravity(Gravity.CENTER);
+            name.setText(day.name);
+            TextView symbol = Ui.text(this, 20, Ui.TEXT, Ui.MEDIUM);
+            symbol.setGravity(Gravity.CENTER);
+            symbol.setText(day.symbol);
+            symbol.setPadding(0, dp(Ui.SPACE_XS), 0, dp(Ui.SPACE_XS));
+            LinearLayout temps = new LinearLayout(this);
+            temps.setGravity(Gravity.CENTER);
+            TextView high = Ui.text(this, 13, Ui.TEXT, Ui.MEDIUM);
+            high.setText(day.high + "\u00B0");
+            TextView low = Ui.text(this, 11, Ui.MUTED, Ui.MEDIUM);
+            low.setPadding(dp(Ui.SPACE_XS), 0, 0, 0);
+            low.setText(day.low + "\u00B0");
+            temps.addView(high);
+            temps.addView(low);
+            card.addView(name);
+            card.addView(symbol);
+            card.addView(temps);
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(0, dp(84), 1f);
+            cardLp.rightMargin = i + 1 < data.days.size() ? dp(Ui.SPACE_XS) : 0;
+            forecastRow.addView(card, cardLp);
+        }
+    }
+
+    private void refreshWeather() {
+        String location = cfg.weatherLocation().trim();
+        if (location.isEmpty()) {
+            weather.setVisibility(View.GONE);
+            forecastPanel.setVisibility(View.GONE);
+            return;
+        }
+        weather.setVisibility(View.VISIBLE);
+        if (!location.equals(weatherLocation)) {
+            weatherLocation = location;
+            weatherUpdated = 0;
+            weatherData = null;
+            weatherPlace.setText(location.toUpperCase(Locale.getDefault()));
+            weatherCondition.setText("Getting forecast...");
+                    weatherTemp.setText("--\u00B0");
+            weatherIcon.setText("\u25CC");
+        }
+        long now = System.currentTimeMillis();
+        if (weatherLoading || now - weatherUpdated < 30 * 60 * 1000L) return;
+        weatherLoading = true;
+        io.execute(() -> {
+            Weather.Current result = Weather.fetch(location);
+            ui.post(() -> {
+                weatherLoading = false;
+                if (!location.equals(cfg.weatherLocation().trim())) return;
+                weatherUpdated = System.currentTimeMillis() - (result.error == null ? 0 : 25 * 60 * 1000L);
+                weatherData = result;
+                if (result.error == null) {
+                    weatherPlace.setText(result.place.toUpperCase(Locale.getDefault()));
+                    weatherCondition.setText(result.condition);
+                    weatherTemp.setText(result.temperature);
+                    weatherIcon.setText(result.symbol);
+                } else {
+                    weatherCondition.setText(result.error);
+                    weatherTemp.setText("--\u00B0");
+                    weatherIcon.setText(result.symbol);
+                }
+
+                if (forecastPanel.getVisibility() == View.VISIBLE) renderForecast(result);
+            });
+        });
     }
 
     private void background() {
@@ -721,12 +933,11 @@ public final class Home extends Activity {
         boolean image = "image".equals(mode) || "adaptive-tint".equals(mode);
         File file = image ? cfg.wallpaper() : null;
         tintWallpaper = "adaptive-tint".equals(mode) && file != null;
+
         if ("adaptive".equals(mode)) {
             if (!mode.equals(backgroundMode)) {
-                stopColorAnimation();
                 targetColor = 0;
                 root.setBackgroundColor(FocusColor.FALLBACK);
-                displayedColor = FocusColor.FALLBACK;
                 tint.setBackgroundColor(Color.TRANSPARENT);
             }
             backgroundMode = mode;
@@ -734,19 +945,20 @@ public final class Home extends Activity {
         } else if ("adaptive-tint".equals(mode)) {
             root.setBackgroundColor(file == null ? cfg.background() : Color.BLACK);
             if (!mode.equals(backgroundMode) || file == null) {
-                stopColorAnimation();
                 targetColor = 0;
                 tint.setBackgroundColor(Color.TRANSPARENT);
-                displayedColor = Color.TRANSPARENT;
             }
             backgroundMode = mode;
             if (tintWallpaper) focusBackground(focusedItem());
         } else {
-            stopColorAnimation();
             targetColor = 0;
             backgroundMode = mode;
             tint.setBackgroundColor(Color.TRANSPARENT);
-            root.setBackgroundColor(cfg.background());
+            if ("gradient".equals(mode)) {
+                root.setBackground(Ui.gradient(cfg.gradientColors(), cfg.get(Config.GRADIENT_DIRECTION)));
+            } else {
+                root.setBackgroundColor(cfg.background());
+            }
         }
         int dim = Integer.parseInt(cfg.get(Config.DIM));
         shade.setBackgroundColor(file == null ? Color.TRANSPARENT : Color.argb(dim * 255 / 100, 0, 0, 0));
@@ -778,6 +990,50 @@ public final class Home extends Activity {
         return BitmapFactory.decodeFile(f.getPath(), o);
     }
 
+    private void openHomeMenu() {
+        if (homeMenu != null && homeMenu.isShowing()) {
+            homeMenu.dismiss();
+            return;
+        }
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(Ui.SPACE_SM), dp(Ui.SPACE_SM), dp(Ui.SPACE_SM), dp(Ui.SPACE_SM));
+        panel.setBackground(Ui.menuSurface(this, dp(16)));
+
+        PopupWindow popup = new PopupWindow(panel, dp(208), WRAP, true);
+        popup.setBackgroundDrawable(Ui.menuSurface(this, dp(16)));
+        popup.setElevation(dp(10));
+        popup.setOutsideTouchable(true);
+        popup.setInputMethodMode(PopupWindow.INPUT_METHOD_NOT_NEEDED);
+        homeMenu = popup;
+        TextView options = homeMenuItem(panel, "Options", popup,
+                () -> startActivity(new Intent(this, Options.class)));
+        homeMenuItem(panel, "TV Settings", popup, this::openSettings);
+        popup.setOnDismissListener(() -> {
+            if (homeMenu == popup) homeMenu = null;
+            if (menuButton != null && !isFinishing()) menuButton.requestFocus();
+        });
+        popup.showAsDropDown(menuButton, menuButton.getWidth() - dp(208), dp(Ui.SPACE_XS));
+        options.requestFocus();
+    }
+
+    private TextView homeMenuItem(LinearLayout panel, String title, PopupWindow popup, Runnable action) {
+        TextView item = Ui.text(this, 14, Ui.TEXT, Ui.MEDIUM);
+        item.setText(title);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_SM), dp(Ui.SPACE_MD), dp(Ui.SPACE_SM));
+        item.setFocusable(true);
+        item.setClickable(true);
+        Ui.focusStyle(item, cfg.accent(), 0x14FFFFFF, dp(10));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, dp(44));
+        lp.bottomMargin = dp(Ui.SPACE_XS);
+        panel.addView(item, lp);
+        item.setOnClickListener(v -> {
+            popup.dismiss();
+            action.run();
+        });
+        return item;
+    }
     /**
      * Fire OS answers the generic settings action with a stub that reopens Amazon's home, which
      * Guard then replaces with ours. The TV settings entry point opens the real settings screen.
@@ -848,7 +1104,7 @@ public final class Home extends Activity {
         field.setText(Catalog.label(cfg, t.item));
         field.setSelectAllOnFocus(true);
         FrameLayout box = new FrameLayout(this);
-        box.setPadding(dp(24), dp(8), dp(24), 0);
+        box.setPadding(dp(Ui.SPACE_XL), dp(Ui.SPACE_SM), dp(Ui.SPACE_XL), 0);
         box.addView(field);
         String key = "name." + t.item.id;
         AlertDialog d = new AlertDialog.Builder(this, Ui.DIALOG)

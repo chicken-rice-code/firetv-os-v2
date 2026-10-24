@@ -67,7 +67,7 @@ no root:
   stops Amazon's telemetry and automatic updates from reaching their servers.
   Everything else, including your streaming apps, works as before.
 - **Replaces the home screen** with [dumbtv home](launcher/README.md): your apps,
-  your inputs and a clock. 54 KB, open source, no internet access, no permissions.
+  your inputs, a clock and current weather. Weather uses the internet but does not read device location.
 - **Leaves your apps alone.** Nothing you watch is removed unless you name it.
 - **Can all be undone** with one command.
 
@@ -144,8 +144,8 @@ A home screen that shows your apps and your HDMI inputs, and nothing else. Accen
 colours, tile sizes, rows or a grid, wallpapers, adaptive backgrounds, renaming and
 hiding, all from the remote. HOME lands on it in a fraction of a second.
 
-It is plain Java with no libraries and no internet permission, so it cannot send
-anything anywhere. On Fire OS 7 and 8 it asks for no permissions at all. It works
+It is plain Java with no libraries. Weather sends the city chosen in Options to Open-Meteo; it does not read device location. On Fire OS 7 and 8 it asks for no runtime permissions.
+It works
 on its own, without the rest of dumbtv:
 
 ```sh

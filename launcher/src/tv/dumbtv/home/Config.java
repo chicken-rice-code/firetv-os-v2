@@ -32,6 +32,7 @@ import java.util.TimeZone;
  */
 final class Config {
     static final String FILE = "home.conf";
+    static final String DEFAULT_WEATHER_LOCATION = "Plymouth, UK";
 
     static final class Choice {
         final String key, title;
@@ -61,9 +62,9 @@ final class Config {
     static final Choice LAYOUT = new Choice("layout", "Layout", "rows",
             new String[] {"rows", "grid"},
             new String[] {"Rows", "Grid"});
-    static final Choice LABELS = new Choice("labels", "App names", "focus",
-            new String[] {"focus", "always", "never"},
-            new String[] {"On focus", "Always", "Never"});
+    static final Choice LABELS = new Choice("labels", "App names", "never",
+            new String[] {"never", "always"},
+            new String[] {"Never", "Always"});
     static final Choice CLOCK = new Choice("clock", "Clock", "auto",
             new String[] {"auto", "24h", "12h"},
             new String[] {"System", "24-hour", "12-hour"});
@@ -73,9 +74,15 @@ final class Config {
     static final Choice SWITCH = new Choice("switch", "Open inputs with", "auto",
             new String[] {"auto", "tv", "home"},
             new String[] {"Automatic", "The TV's app", "dumbtv home"});
-    static final Choice BACKGROUND = new Choice("background", "Background", "black",
-            new String[] {"black", "graphite", "midnight", "image", "adaptive", "adaptive-tint"},
-            new String[] {"Black", "Graphite", "Midnight", "Image file", "Adaptive solid", "Adaptive wallpaper tint"});
+    static final Choice BACKGROUND = new Choice("background", "Background", "gradient",
+            new String[] {"black", "graphite", "midnight", "gradient", "image", "adaptive", "adaptive-tint"},
+            new String[] {"Black", "Graphite", "Midnight", "Gradient", "Image file", "Adaptive solid", "Adaptive wallpaper tint"});
+    static final Choice GRADIENT = new Choice("gradient", "Gradient style", "ocean",
+            new String[] {"ocean", "cobalt", "teal", "plum", "slate"},
+            new String[] {"Ocean", "Cobalt", "Teal", "Plum", "Slate"});
+    static final Choice GRADIENT_DIRECTION = new Choice("gradient.direction", "Gradient direction", "diagonal",
+            new String[] {"diagonal", "reverse", "vertical", "horizontal"},
+            new String[] {"Diagonal", "Reverse", "Top to bottom", "Left to right"});
     static final Choice DIM = new Choice("dim", "Image dim", "40",
             new String[] {"0", "20", "40", "60", "80"},
             new String[] {"0%", "20%", "40%", "60%", "80%"});
@@ -84,7 +91,8 @@ final class Config {
             new String[] {"off", "visit", "hourly", "daily", "daytime"},
             new String[] {"Off", "Every return home", "Every hour", "Every day", "By time of day"});
 
-    static final Choice[] CHOICES = {ACCENT, TILES, LAYOUT, LABELS, CLOCK, INPUTS, SWITCH, BACKGROUND, DIM, ROTATE};
+    static final Choice[] CHOICES = {ACCENT, TILES, LAYOUT, LABELS, CLOCK, INPUTS, SWITCH,
+            BACKGROUND, GRADIENT, GRADIENT_DIRECTION, DIM, ROTATE};
 
     /** Folder of wallpapers, next to home.conf, that Background › Image file rotates through. */
     static final String WALLPAPERS = "wallpapers";
@@ -93,7 +101,7 @@ final class Config {
     private static final int[] ACCENTS = {
         0xFFFFFFFF, 0xFF3D8BFF, 0xFF2BC4E8, 0xFF34C759, 0xFFFFB340, 0xFFFF5147, 0xFFFF5C9D, 0xFFA07CFF,
     };
-    private static final int[] BACKGROUNDS = {0xFF000000, 0xFF141518, 0xFF0B1220, 0xFF000000, 0xFF141518, 0xFF141518};
+    private static final int[] BACKGROUNDS = {0xFF000000, 0xFF141518, 0xFF0B1220, 0xFF0B1729, 0xFF000000, 0xFF141518, 0xFF141518};
 
     private static Config instance;
 
@@ -169,6 +177,12 @@ final class Config {
         return v != null && Arrays.asList(c.values).contains(v) ? v : c.fallback;
     }
 
+    String weatherLocation() {
+        String value = values.get("weather.location");
+        if (value == null) return DEFAULT_WEATHER_LOCATION;
+        return "off".equalsIgnoreCase(value) ? "" : value;
+    }
+
     void set(String key, String value) {
         if (value == null || value.isEmpty()) values.remove(key);
         else values.put(key, value);
@@ -217,6 +231,16 @@ final class Config {
 
     int background() {
         return BACKGROUNDS[Arrays.asList(BACKGROUND.values).indexOf(get(BACKGROUND))];
+    }
+
+    int[] gradientColors() {
+        switch (get(GRADIENT)) {
+            case "cobalt": return new int[] {0xFF193B72, 0xFF10264B, 0xFF080F20};
+            case "teal": return new int[] {0xFF104044, 0xFF0B2A31, 0xFF07131D};
+            case "plum": return new int[] {0xFF382447, 0xFF21172F, 0xFF0D101D};
+            case "slate": return new int[] {0xFF303B4B, 0xFF1B2635, 0xFF0A111C};
+            default: return new int[] {0xFF102B4C, 0xFF091A30, 0xFF050B17};
+        }
     }
 
     /** Counts returns to the home screen, for the "visit" rotation. */

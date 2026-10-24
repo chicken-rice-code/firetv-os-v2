@@ -13,6 +13,8 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -21,7 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-/** Every setting is a row: left/right or OK cycles it, and the change is saved at once. */
+/** TV friendly, focusable setting tiles that save changes immediately. */
 public final class Options extends Activity {
     private static final int WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
 
@@ -33,46 +35,69 @@ public final class Options extends Activity {
         super.onCreate(state);
         cfg = Config.get(this);
 
+        FrameLayout page = new FrameLayout(this);
+        page.setBackground(Ui.gradient(cfg.gradientColors(), cfg.get(Config.GRADIENT_DIRECTION)));
+        refreshers.add(() -> page.setBackground(Ui.gradient(cfg.gradientColors(), cfg.get(Config.GRADIENT_DIRECTION))));
         ScrollView scroll = new ScrollView(this);
         scroll.setFocusable(false);
         scroll.setVerticalScrollBarEnabled(false);
-        scroll.setBackgroundColor(0xFF0C0C0E);
+        scroll.setBackgroundColor(0x00000000);
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(dp(56), dp(40), dp(56), dp(40));
+        list.setPadding(dp(Ui.PAGE_GUTTER), dp(Ui.PAGE_GUTTER), dp(Ui.PAGE_GUTTER), dp(Ui.PAGE_GUTTER));
         scroll.addView(list);
 
-        TextView title = Ui.text(this, 30, Ui.TEXT, Ui.LIGHT);
+        TextView title = Ui.text(this, 34, Ui.TEXT, Ui.LIGHT);
         title.setText("Options");
-        title.setPadding(dp(16), 0, 0, dp(20));
+        title.setPadding(dp(Ui.SPACE_MD), 0, 0, dp(Ui.SPACE_XS));
         list.addView(title);
 
-        for (Config.Choice c : Config.CHOICES) list.addView(choice(c));
-        list.addView(action("Next wallpaper", () -> {
-            cfg.nextWallpaper();
-            refresh();
-        }));
-        list.addView(gap());
-        list.addView(action("Apps on home screen", () -> pick(Catalog.APPS)));
-        list.addView(action("Inputs on home screen", () -> pick(Catalog.INPUTS)));
-        list.addView(action("Reset order, names and hidden tiles", this::reset));
-        list.addView(action("Open Amazon's home screen", () -> {
-            Guard.amazon(this);
-            finish();
-        }));
+        TextView subtitle = Ui.text(this, 15, Ui.MUTED, Ui.REGULAR);
+        subtitle.setText("Select a tile to change a setting or open a screen.");
+        subtitle.setPadding(dp(Ui.SPACE_MD), 0, 0, dp(Ui.SPACE_LG));
+        list.addView(subtitle);
+        list.addView(section("DISPLAY"));
+        addTileGrid(list,
+                choice(Config.ACCENT), choice(Config.TILES), choice(Config.LAYOUT), choice(Config.LABELS));
 
+        list.addView(section("TV AND TIME"));
+        addTileGrid(list, choice(Config.CLOCK), choice(Config.INPUTS), choice(Config.SWITCH));
+
+        list.addView(section("BACKGROUND"));
+        addTileGrid(list, choice(Config.BACKGROUND), choice(Config.GRADIENT),
+                choice(Config.GRADIENT_DIRECTION), choice(Config.DIM), choice(Config.ROTATE),
+                action("Next wallpaper", () -> {
+                    cfg.nextWallpaper();
+                    refresh();
+                }));
+
+        list.addView(section("WEATHER"));
+        addTileGrid(list, weatherLocation());
+
+        list.addView(section("HOME SCREEN"));
+        addTileGrid(list,
+                action("Apps on home screen", () -> pick(Catalog.APPS)),
+                action("Inputs on home screen", () -> pick(Catalog.INPUTS)),
+                action("Reset order, names and hidden tiles", this::reset),
+                action("Open Amazon's home screen", () -> {
+                    Guard.amazon(this);
+                    finish();
+                }));
+        list.addView(section("ABOUT"));
         TextView about = Ui.text(this, 13, Ui.FAINT, Ui.MEDIUM);
         about.setLineSpacing(0, 1.4f);
-        about.setPadding(dp(16), dp(28), 0, 0);
+        about.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_XL), 0, 0);
         about.setText("Settings file: " + cfg.dir + "/" + Config.FILE
                 + "\nOne wallpaper: name it exactly wallpaper.jpg (or .png) and put it in that folder"
                 + "\nSeveral wallpapers: put them in " + Config.WALLPAPERS + "/ with any names, and pick a rotation"
-                + "\nThen pick Background › Image file or Adaptive wallpaper tint. No permission is needed"
+                + "\nChoose Background > Gradient, then select a Gradient style. Image file and adaptive wallpaper tint are also available"
                 + "\nAdaptive wallpaper tint shows graphite until you add a wallpaper"
-                + "\nNo internet permission. No tracking, no ads, no accounts.");
+                + "\nWeather via Open-Meteo. Your chosen city is sent to its API; device location is not read.");
         list.addView(about);
 
-        setContentView(scroll);
+        page.addView(scroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(page);
         refresh();
     }
 
@@ -88,44 +113,80 @@ public final class Options extends Activity {
     }
 
     private View choice(Config.Choice c) {
-        LinearLayout row = row();
-        TextView name = label(c.title);
-        TextView value = Ui.text(this, 16, Ui.MUTED, Ui.MEDIUM);
-        value.setGravity(Gravity.END);
-        row.addView(name, new LinearLayout.LayoutParams(0, WRAP, 1f));
-        row.addView(value, new LinearLayout.LayoutParams(WRAP, WRAP));
-        row.setOnClickListener(v -> step(c, 1));
-        row.setOnKeyListener((v, code, e) -> {
-            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
-            if (code == KeyEvent.KEYCODE_DPAD_LEFT) return step(c, -1);
-            if (code == KeyEvent.KEYCODE_DPAD_RIGHT) return step(c, 1);
-            return false;
-        });
+        LinearLayout tile = row();
+        tile.setOrientation(LinearLayout.VERTICAL);
+        TextView name = Ui.text(this, 12, Ui.MUTED, Ui.MEDIUM);
+        name.setText(c.title);
+        TextView value = Ui.text(this, 17, Ui.TEXT, Ui.MEDIUM);
+        value.setMaxLines(2);
+        value.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        LinearLayout.LayoutParams valueLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, WRAP);
+        valueLp.topMargin = dp(Ui.SPACE_XS);
+        tile.addView(name);
+        tile.addView(value, valueLp);
+        tile.setOnClickListener(v -> step(c, 1));
         Runnable show = () -> {
-            boolean focused = row.isFocused();
+            boolean focused = tile.isFocused();
             String text = c.name(cfg.get(c));
             if (c == Config.ACCENT) {
-                SpannableString s = new SpannableString("●  " + text);
-                s.setSpan(new ForegroundColorSpan(cfg.accent()), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                value.setText(focused ? "‹  " : "");
-                value.append(s);
-                if (focused) value.append("  ›");
+                SpannableString swatch = new SpannableString("\u25CF  " + text);
+                swatch.setSpan(new ForegroundColorSpan(cfg.accent()), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                value.setText(focused ? "\u2039  " : "");
+                value.append(swatch);
+                if (focused) value.append("  \u203A");
             } else {
-                value.setText(focused ? "‹  " + text + "  ›" : text);
+                value.setText(focused ? "\u2039  " + text + "  \u203A" : text);
             }
             value.setTextColor(focused ? Ui.TEXT : Ui.MUTED);
-            boolean off = (c == Config.DIM || c == Config.ROTATE)
-                    && !"image".equals(cfg.get(Config.BACKGROUND))
-                    && !"adaptive-tint".equals(cfg.get(Config.BACKGROUND))
+            String background = cfg.get(Config.BACKGROUND);
+            boolean off = ((c == Config.DIM || c == Config.ROTATE)
+                    && !"image".equals(background)
+                    && !"adaptive-tint".equals(background))
+                    || (c == Config.GRADIENT || c == Config.GRADIENT_DIRECTION) && !"gradient".equals(background)
                     || c == Config.SWITCH && "off".equals(cfg.get(Config.INPUTS));
-            row.setAlpha(off ? 0.4f : 1f);
+            tile.setAlpha(off ? 0.4f : 1f);
         };
-        row.setOnFocusChangeListener((v, has) -> show.run());
+        tile.setOnFocusChangeListener((v, has) -> {
+            show.run();
+            style(tile);
+        });
         refreshers.add(show);
-        refreshers.add(() -> style(row));
-        return row;
+        refreshers.add(() -> style(tile));
+        return tile;
     }
-
+    private View weatherLocation() {
+        LinearLayout tile = row();
+        tile.setOrientation(LinearLayout.VERTICAL);
+        TextView name = Ui.text(this, 12, Ui.MUTED, Ui.MEDIUM);
+        name.setText("Weather location");
+        TextView value = Ui.text(this, 17, Ui.TEXT, Ui.MEDIUM);
+        value.setText(cfg.weatherLocation().isEmpty() ? "Off" : cfg.weatherLocation());
+        tile.addView(name);
+        LinearLayout.LayoutParams valueLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, WRAP);
+        valueLp.topMargin = dp(Ui.SPACE_XS);
+        tile.addView(value, valueLp);
+        tile.setOnClickListener(v -> {
+            EditText input = new EditText(this);
+            input.setSingleLine(true);
+            input.setText(cfg.weatherLocation());
+            input.setSelection(input.length());
+            new AlertDialog.Builder(this, Ui.DIALOG)
+                    .setTitle("Weather location")
+                    .setMessage("Enter a city or town; leave blank for Off")
+                    .setView(input)
+                    .setPositiveButton("Save", (d, which) -> {
+                        String place = input.getText().toString().trim();
+                        cfg.set("weather.location", place.isEmpty() ? "off" : place);
+                        value.setText(cfg.weatherLocation().isEmpty() ? "Off" : cfg.weatherLocation());
+                    })
+                    .setNegativeButton("Cancel", null)
+                    .show();
+        });
+        refreshers.add(() -> style(tile));
+        return tile;
+    }
     private boolean step(Config.Choice c, int by) {
         int i = Arrays.asList(c.values).indexOf(cfg.get(c));
         int n = c.values.length;
@@ -135,46 +196,63 @@ public final class Options extends Activity {
     }
 
     private View action(String text, Runnable run) {
-        LinearLayout row = row();
-        row.addView(label(text), new LinearLayout.LayoutParams(0, WRAP, 1f));
-        TextView chevron = Ui.text(this, 16, Ui.MUTED, Ui.MEDIUM);
-        chevron.setText("›");
-        row.addView(chevron);
-        row.setOnClickListener(v -> run.run());
-        refreshers.add(() -> style(row));
-        return row;
+        LinearLayout tile = row();
+        tile.setOrientation(LinearLayout.HORIZONTAL);
+        TextView title = Ui.text(this, 15, Ui.TEXT, Ui.MEDIUM);
+        title.setText(text);
+        title.setMaxLines(2);
+        tile.addView(title, new LinearLayout.LayoutParams(0, WRAP, 1f));
+        TextView chevron = Ui.text(this, 20, Ui.MUTED, Ui.REGULAR);
+        chevron.setText("\u203A");
+        tile.addView(chevron);
+        tile.setOnClickListener(v -> run.run());
+        refreshers.add(() -> style(tile));
+        return tile;
     }
 
     private LinearLayout row() {
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setFocusable(true);
-        row.setClickable(true);
-        row.setPadding(dp(16), dp(14), dp(16), dp(14));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(600), WRAP);
-        lp.bottomMargin = dp(4);
-        row.setLayoutParams(lp);
-        return row;
+        LinearLayout tile = new LinearLayout(this);
+        tile.setGravity(Gravity.CENTER_VERTICAL);
+        tile.setFocusable(true);
+        tile.setClickable(true);
+        tile.setOnFocusChangeListener((v, has) -> style(tile));
+        tile.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_SM), dp(Ui.SPACE_MD), dp(Ui.SPACE_SM));
+        return tile;
+    }
+
+    private void addTileGrid(LinearLayout parent, View... tiles) {
+        for (int i = 0; i < tiles.length; i += 2) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setClipChildren(false);
+            row.setClipToPadding(false);
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, WRAP);
+            rowLp.bottomMargin = dp(Ui.SPACE_XS);
+            parent.addView(row, rowLp);
+            for (int column = 0; column < 2 && i + column < tiles.length; column++) {
+                LinearLayout.LayoutParams tileLp = new LinearLayout.LayoutParams(
+                        0, dp(84), 1f);
+                if (column == 0) tileLp.rightMargin = dp(Ui.SPACE_XS);
+                else tileLp.leftMargin = dp(Ui.SPACE_XS);
+                row.addView(tiles[i + column], tileLp);
+            }
+        }
+    }
+    private View section(String text) {
+        TextView label = Ui.text(this, 11, Ui.MUTED, Ui.MEDIUM);
+        label.setText(text);
+        label.setLetterSpacing(0.18f);
+        label.setPadding(dp(Ui.SPACE_MD), dp(Ui.SPACE_LG), 0, dp(Ui.SPACE_XS));
+        return label;
     }
 
     private void style(View row) {
         StateListDrawable bg = new StateListDrawable();
-        bg.addState(new int[] {android.R.attr.state_focused},
-                Ui.round((cfg.accent() & 0x00FFFFFF) | 0x33000000, dp(10)));
-        bg.addState(new int[0], Ui.round(0x00000000, dp(10)));
+        bg.addState(new int[] {android.R.attr.state_focused}, Ui.glassOutline(this, dp(14), cfg.accent()));
+        bg.addState(new int[] {android.R.attr.state_hovered}, Ui.glassOutline(this, dp(14), cfg.accent()));
+        bg.addState(new int[0], Ui.glass(this, dp(14)));
         row.setBackground(bg);
-    }
-
-    private TextView label(String text) {
-        TextView v = Ui.text(this, 16, Ui.TEXT, Ui.MEDIUM);
-        v.setText(text);
-        return v;
-    }
-
-    private View gap() {
-        View v = new View(this);
-        v.setLayoutParams(new LinearLayout.LayoutParams(1, dp(18)));
-        return v;
     }
 
     private void pick(String kind) {

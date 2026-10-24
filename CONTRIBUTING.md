@@ -61,8 +61,8 @@ The rules the code keeps, and that a change must keep too:
   touched.
 - Amazon packages are disabled, never uninstalled.
 - No app a person uses is removed unless they named it.
-- The launcher asks for no permissions on Fire OS 7 and 8 and has no internet
-  access. CI enforces this.
+- The launcher asks for no runtime permissions on Fire OS 7 and 8. Weather sends the selected city to Open-Meteo; CI allows only INTERNET on newer Android versions.
+
 - Every step can be undone with `scripts/restore.sh`.
 
 Test on a real TV, say which one and which build in the pull request, and run the

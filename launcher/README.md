@@ -8,11 +8,8 @@ A home screen for Fire TV that does one job: show your apps and your HDMI inputs
 
 - **54 KB.** Plain Java and Android views. No AndroidX, Kotlin, Compose, Play
   Services or any other library.
-- **No network.** There is no `INTERNET` permission, so Android will not let it
-  open a connection.
-- **No permissions on Fire OS 7 and 8.** It declares three (usage access, task
-  order, boot completed), each limited to Android 8.1 and earlier, for the Fire OS 6
-  Keeper below. Check: `aapt2 dump permissions dumbtv-home.apk`.
+- **Weather in the header.** Current conditions come from Open-Meteo for a city set in Options. The city and network address go to Open-Meteo; device location is not read.
+- **No runtime permissions.** Fire OS 6 uses three permissions capped at Android 8.1. Weather uses the normal INTERNET permission. Check: `aapt2 dump permissions dumbtv-home.apk`.
 - **No ads, no recommended rows, no account, no analytics, no update checks.**
 - About 60–70 MB of memory with the home screen showing, about 37 MB while an app
   plays (measured on a Fire TV Edition television with 1.4 GB of RAM).
@@ -69,6 +66,8 @@ without a TV banner, like the Appstore, start hidden; tick them to add them.
 |---|---|---|
 | ![Grid layout](../docs/assets/screens/grid.png) | ![Adaptive background](../docs/assets/screens/adaptive.png) | ![Adaptive tint](../docs/assets/screens/tint.png) |
 
+Weather source: Open-Meteo. Set the location in Options. Leave it blank to turn the weather display off.
+
 ## HDMI inputs
 
 **Options › Open inputs with** decides what an input tile does:
@@ -124,7 +123,7 @@ Comments go on their own line. Back it up with `adb pull`, restore it with
 
 ### Wallpapers
 
-No permission is needed: the launcher reads its own folder.
+No storage permission is needed: the launcher reads its own folder.
 
 - **One wallpaper:** push it as `wallpaper.jpg` (or `.jpeg`, `.png`, `.webp`) into
   the folder above and set `background=image`.

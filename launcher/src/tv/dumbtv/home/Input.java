@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputManager;
@@ -46,7 +47,7 @@ public final class Input extends Activity {
     private TvView view;
     private TextView name, status;
     private String id;
-    private final Runnable hideName = () -> name.animate().alpha(0f).setDuration(250)
+    private final Runnable hideName = () -> name.animate().alpha(0f).translationY(-dp(4)).setDuration(250)
             .withEndAction(() -> name.setVisibility(View.GONE)).start();
     private final Runnable noSignal = () -> status(NO_SIGNAL);
 
@@ -115,14 +116,19 @@ public final class Input extends Activity {
 
         status = Ui.text(this, 22, Ui.MUTED, Ui.MEDIUM);
         status.setVisibility(View.GONE);
+        status.setGravity(Gravity.CENTER);
+        status.setPadding(dp(Ui.SPACE_XL), dp(Ui.SPACE_LG), dp(Ui.SPACE_XL), dp(Ui.SPACE_LG));
+        status.setBackground(inputGlass());
+        status.setElevation(dp(8));
         root.addView(status, new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER));
 
         name = Ui.text(this, 20, Ui.TEXT, Ui.MEDIUM);
         name.setText(getIntent().getCharSequenceExtra(EXTRA_NAME));
-        name.setPadding(dp(22), dp(10), dp(22), dp(10));
-        name.setBackground(Ui.round(0xB3000000, dp(10)));
+        name.setPadding(dp(Ui.SPACE_XL), dp(Ui.SPACE_SM), dp(Ui.SPACE_XL), dp(Ui.SPACE_SM));
+        name.setBackground(inputGlass());
+        name.setElevation(dp(6));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(WRAP, WRAP, Gravity.TOP | Gravity.START);
-        lp.setMargins(dp(56), dp(40), 0, 0);
+        lp.setMargins(dp(Ui.PAGE_GUTTER), dp(Ui.PAGE_GUTTER), 0, 0);
         root.addView(name, lp);
         setContentView(root);
     }
@@ -176,16 +182,37 @@ public final class Input extends Activity {
     private void showName() {
         ui.removeCallbacks(hideName);
         name.animate().cancel();
-        name.setAlpha(1f);
+        name.setAlpha(0f);
+        name.setTranslationY(-dp(6));
         name.setVisibility(View.VISIBLE);
+        name.animate().alpha(1f).translationY(0f).setDuration(220)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
         ui.postDelayed(hideName, NAME_MS);
     }
 
     private void status(String text) {
         Log.i("dumbtv", "input " + id + ": " + (text == null ? "video" : text));
         ui.removeCallbacks(noSignal);
-        status.setText(text);
-        status.setVisibility(text == null ? View.GONE : View.VISIBLE);
+        status.animate().cancel();
+        if (text == null) {
+            status.setVisibility(View.GONE);
+        } else {
+            status.setText(text);
+            status.setAlpha(0f);
+            status.setScaleX(0.97f);
+            status.setScaleY(0.97f);
+            status.setVisibility(View.VISIBLE);
+            status.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(240)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        }
+    }
+
+    private GradientDrawable inputGlass() {
+        GradientDrawable panel = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0xD9262C38, 0xC912151D});
+        panel.setCornerRadius(dp(16));
+        panel.setStroke(dp(1), 0x66FFFFFF);
+        return panel;
     }
 
     private int dp(float v) {
