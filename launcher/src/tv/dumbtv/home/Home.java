@@ -33,6 +33,7 @@ public final class Home extends Activity {
     private Config cfg;
     private HomeScreen screen;
     private WeatherRepository weather;
+    private BinReminder bins;
     private List<Item> all = new ArrayList<>();
     private String lastFocus, lastApp;
     private int generation;
@@ -51,24 +52,32 @@ public final class Home extends Activity {
         if (state != null) { lastFocus = state.getString("focus"); lastApp = state.getString("app"); initialFocusDone = true; }
         screen = new HomeScreen(this, () -> openOptions(false), () -> openOptions(true));
         screen.onResize(this::renderApps);
-        screen.weather.onReturnToApps(this::focusApp);
-        screen.weather.onForecastFocus((v, active) -> {
-            if (active) lastFocus = "forecast";
-            screen.footer.setText(active ? "\u25C0 \u25B6 Scroll forecast \u00B7 \u2191 Return to apps"
+        screen.reminders.onUp(this::focusApp);
+        screen.reminders.onRowFocusChange((v, active) -> {
+            if (active) { lastFocus = "reminders"; screen.ensureVisible(v); }
+            screen.footer.setText(active ? "Bin collection dates \u00B7 \u2191 Apps"
                     : "\u25C0 \u25B6 Browse apps \u00B7 Select to open \u00B7 \u2193 Weather");
+        });
+        screen.reminders.onTileHover((v, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_HOVER_ENTER) screen.ensureVisible(v);
+            return false;
         });
         screen.settings.setOnFocusChangeListener((v, has) -> {
             Ui.animateFocus(v, has); if (has && initialFocusDone) lastFocus = "settings";
         });
         screen.settings.setOnKeyListener((v, code, event) -> {
             if (event.getAction() == KeyEvent.ACTION_DOWN && code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (screen.weatherAction.isFocusable()) { screen.weatherAction.requestFocus(); return true; }
                 focusApp(); return true;
             }
             return false;
         });
         screen.weatherAction.setOnKeyListener((v, code, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN && code == KeyEvent.KEYCODE_DPAD_UP) {
-                focusApp(); return true;
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (code == KeyEvent.KEYCODE_DPAD_UP) { screen.settings.requestFocus(); return true; }
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusApp(); return true;
+                }
             }
             return false;
         });
@@ -76,12 +85,15 @@ public final class Home extends Activity {
             if (isDestroyed()) return;
             screen.weather.update(data, message, is24Hour(), System.currentTimeMillis());
             boolean configure = cfg.weatherLocation().isEmpty() || data == null && !message.startsWith("Getting");
-            screen.weatherAction.setText(configure ? "Set weather location" : "Next 12 hours \u00B7 \u25C0 \u25B6");
+            screen.weatherAction.setText(configure ? "Set weather location" : "");
             screen.weatherAction.setFocusable(configure);
             screen.weatherAction.setClickable(configure);
             screen.weatherStatus.setText(data == null ? "" : message.isEmpty()
                     ? data.location.name + " \u00B7 " + ("fahrenheit".equals(cfg.get(Config.UNITS)) ? "\u00B0F" : "\u00B0C")
                     : message);
+        });
+        bins = new BinReminder(this, (title, detail, upcoming) -> {
+            if (!isDestroyed()) screen.reminders.update(title, detail, upcoming);
         });
         setContentView(screen);
         IntentFilter changes = new IntentFilter();
@@ -97,15 +109,15 @@ public final class Home extends Activity {
         IntentFilter changes = new IntentFilter(Intent.ACTION_TIME_TICK);
         changes.addAction(Intent.ACTION_TIME_CHANGED); changes.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         changes.addAction(Intent.ACTION_DATE_CHANGED); registerReceiver(time, changes);
-        weather.resume(cfg); tick(); renderApps();
+        weather.resume(cfg); bins.resume(); tick(); renderApps();
     }
     @Override protected void onPause() {
-        resumed = false; unregisterReceiver(time); weather.pause();
+        resumed = false; unregisterReceiver(time); weather.pause(); bins.pause();
         if (moving != null) stopMoving();
         super.onPause();
     }
     @Override protected void onDestroy() {
-        unregisterReceiver(packages); weather.close(); io.shutdownNow(); super.onDestroy();
+        unregisterReceiver(packages); weather.close(); bins.close(); io.shutdownNow(); super.onDestroy();
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("focus", lastFocus); state.putString("app", lastApp); super.onSaveInstanceState(state);
@@ -115,7 +127,8 @@ public final class Home extends Activity {
         super.onNewIntent(intent); if (resumed) restoreFocus();
     }
     @Override public void onBackPressed() {
-        if (moving != null) stopMoving(); else focusApp();
+        if (moving != null) stopMoving();
+        else focusApp();
     }
     @Override public boolean onKeyDown(int code, KeyEvent event) {
         if (code == KeyEvent.KEYCODE_MENU) {
@@ -145,6 +158,10 @@ public final class Home extends Activity {
         lastFocus = location ? "weather" : "settings";
         startActivity(new Intent(this, Options.class).putExtra("weather", location));
     }
+    private void openBinOptions() {
+        initialFocusDone = true; lastFocus = "reminders";
+        startActivity(new Intent(this, Options.class).putExtra("bin_reminders", true));
+    }
 
     private void loadApps() {
         int request = ++generation;
@@ -167,24 +184,29 @@ public final class Home extends Activity {
         String restoreControl = lastFocus, restoreApp = lastApp;
         screen.apps.strip.removeAllViews();
         float scale = screen.designScale();
-        int width = Math.round(264 * scale), height = Math.round(214 * scale);
+        int width = Math.round(230 * scale), height = Math.round(188 * scale);
         for (Item item : items) {
             Tile tile = new Tile(this, item, Catalog.APPS, Catalog.label(cfg, item), width, height, "always", Ui.TEXT);
             tile.setOnClickListener(v -> launch(tile));
             tile.setOnLongClickListener(v -> { menu(tile); return true; });
-            tile.setOnFocusChangeListener((v, has) -> { if (has) { lastFocus = item.id; lastApp = item.id; } });
-            tile.setNextFocusUpId(screen.settings.getId());
+            tile.setOnFocusChangeListener((v, has) -> {
+                if (has) { lastFocus = item.id; lastApp = item.id; screen.ensureVisible(v); }
+            });
+            tile.setOnHoverListener((v, event) -> {
+                if (event.getActionMasked() == android.view.MotionEvent.ACTION_HOVER_ENTER) screen.ensureVisible(v);
+                return false;
+            });
             tile.setOnKeyListener((v, code, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-                if (code == KeyEvent.KEYCODE_DPAD_UP) { screen.settings.requestFocus(); return true; }
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN && screen.weather.focusForecast()) return true;
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN && screen.weatherAction.isFocusable()) {
-                    screen.weatherAction.requestFocus(); return true;
+                if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (screen.weatherAction.isFocusable()) { screen.weatherAction.requestFocus(); return true; }
+                    screen.settings.requestFocus(); return true;
                 }
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN) { screen.reminders.focusFirst(); return true; }
                 return false;
             });
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(width, height);
-            lp.rightMargin = Math.round(24 * scale);
+            lp.rightMargin = Math.round(18 * scale);
             screen.apps.strip.addView(tile, lp);
             if (!item.artRequested) {
                 item.artRequested = true;
@@ -203,10 +225,12 @@ public final class Home extends Activity {
             add.setOnClickListener(v -> startActivity(new Intent(this, Favorites.class)));
             add.setOnKeyListener((v, code, event) -> {
                 if (code == KeyEvent.KEYCODE_DPAD_UP && event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (screen.weatherAction.isFocusable()) { screen.weatherAction.requestFocus(); return true; }
                     screen.settings.requestFocus(); return true;
                 }
-                if (code == KeyEvent.KEYCODE_DPAD_DOWN && event.getAction() == KeyEvent.ACTION_DOWN
-                        && screen.weather.focusForecast()) return true;
+                if (code == KeyEvent.KEYCODE_DPAD_DOWN && event.getAction() == KeyEvent.ACTION_DOWN) {
+                    screen.reminders.focusFirst(); return true;
+                }
                 return false;
             });
             screen.apps.strip.addView(add, new LinearLayout.LayoutParams(width, Math.round(154 * scale)));
@@ -222,7 +246,7 @@ public final class Home extends Activity {
         }
         if ("settings".equals(lastFocus)) screen.settings.requestFocus();
         else if ("weather".equals(lastFocus) && screen.weatherAction.isFocusable()) screen.weatherAction.requestFocus();
-        else if ("forecast".equals(lastFocus) && screen.weather.focusForecast()) return;
+        else if ("reminders".equals(lastFocus)) screen.reminders.focusFirst();
         else focusApp();
     }
     private void focusApp() {

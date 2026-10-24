@@ -13,6 +13,8 @@ import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,6 +67,13 @@ public final class Options extends Activity {
         addTileGrid(list, location, choice(Config.UNITS), choice(Config.CLOCK));
         if (getIntent().getBooleanExtra("weather", false)) location.post(() -> location.performClick());
 
+        list.addView(section("REMINDERS"));
+        View binAddress = binAddress();
+        addTileGrid(list, binAddress,
+                action("Clear saved bin address", this::clearBinAddress),
+                action("Open Plymouth Council bin checker", this::openBinChecker));
+        if (getIntent().getBooleanExtra("bin_reminders", false)) binAddress.post(() -> binAddress.performClick());
+
         list.addView(section("HOME SCREEN"));
         addTileGrid(list,
                 greetingName(),
@@ -81,7 +90,7 @@ public final class Options extends Activity {
         about.setText("Home Together\nWeather by Open-Meteo \u00B7 open-meteo.com \u00B7 CC BY 4.0"
                 + "\nPersonal, non-commercial use. Your chosen city and network address are sent to Open-Meteo."
                 + "\nDevice location is not read. Last successful weather is cached for offline use."
-                + "\nIcons: Google Material Symbols \u00B7 Apache License 2.0");
+                + "\nIcons: Google Material Icons and Symbols \u00B7 Apache License 2.0");
         list.addView(about);
 
         page.addView(scroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -196,6 +205,103 @@ public final class Options extends Activity {
         });
         refreshers.add(() -> style(tile));
         return tile;
+    }
+
+    private View binAddress() {
+        LinearLayout tile = row();
+        tile.setOrientation(LinearLayout.VERTICAL);
+        TextView name = Ui.text(this, 12, Ui.MUTED, Ui.MEDIUM);
+        name.setText("Plymouth bin address");
+        TextView value = Ui.text(this, 17, Ui.TEXT, Ui.MEDIUM);
+        value.setMaxLines(2);
+        Runnable show = () -> value.setText(BinReminder.hasSavedAddress(this) ? "Address saved privately" : "Set up collection reminders");
+        tile.addView(name);
+        LinearLayout.LayoutParams valueLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, WRAP);
+        valueLp.topMargin = dp(Ui.SPACE_XS);
+        tile.addView(value, valueLp);
+        tile.setOnClickListener(v -> confirmBinLookup(show));
+        refreshers.add(show);
+        refreshers.add(() -> style(tile));
+        return tile;
+    }
+
+    private void confirmBinLookup(Runnable refresh) {
+        new AlertDialog.Builder(this, Ui.DIALOG).setTitle("Set up bin reminders")
+                .setMessage("Plymouth Council does not publish a public API. This lookup uses WhenIsBins, an independent service that checks council collection information. Your postcode and the exact property you select or enter are sent to WhenIsBins. Only the property reference and schedule are kept in this app's private storage. Continue?")
+                .setPositiveButton("Continue", (dialog, which) -> enterBinPostcode(refresh))
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void enterBinPostcode(Runnable refresh) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("e.g. PL1 1AA");
+        new AlertDialog.Builder(this, Ui.DIALOG).setTitle("Postcode")
+                .setMessage("Enter the postcode for the property whose bins you want to check.")
+                .setView(input)
+                .setPositiveButton("Find address", (dialog, which) -> {
+                    String postcode = input.getText().toString().trim();
+                    if (postcode.isEmpty()) { toast("Enter a postcode to continue"); return; }
+                    BinReminder api = new BinReminder(this, (title, detail, upcoming) -> { });
+                    refresh.run();
+                    api.discover(postcode, (result, error) -> {
+                        if (error != null) { api.close(); refresh.run(); toast(error.getMessage()); return; }
+                        JSONArray candidates = result.optJSONArray("candidates");
+                        if ("property_id".equals(result.optString("required_input"))
+                                && candidates != null && candidates.length() > 0) {
+                            CharSequence[] labels = new CharSequence[candidates.length()];
+                            for (int i = 0; i < candidates.length(); i++) labels[i] = candidates.optJSONObject(i).optString("label", "Address " + (i + 1));
+                            new AlertDialog.Builder(this, Ui.DIALOG).setTitle("Choose your exact address")
+                                    .setItems(labels, (picker, index) -> {
+                                        JSONObject selected = candidates.optJSONObject(index);
+                                        runBinLookup(api, postcode, selected == null ? "" : selected.optString("id", ""), "", refresh);
+                                    }).setOnCancelListener(d -> api.close()).show();
+                        } else {
+                            enterBinProperty(api, postcode, refresh);
+                        }
+                    });
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void enterBinProperty(BinReminder api, String postcode, Runnable refresh) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("House number and street");
+        new AlertDialog.Builder(this, Ui.DIALOG).setTitle("First line of the address")
+                .setMessage("The council's address list is unavailable, so enter the exact first line of the property.")
+                .setView(input).setPositiveButton("Check collections", (dialog, which) -> {
+                    String property = input.getText().toString().trim();
+                    if (property.isEmpty()) { api.close(); refresh.run(); toast("Enter the first line of the address"); return; }
+                    runBinLookup(api, postcode, "", property, refresh);
+                }).setNegativeButton("Cancel", (dialog, which) -> api.close()).show();
+    }
+
+    private void runBinLookup(BinReminder api, String postcode, String propertyId, String property, Runnable refresh) {
+        api.lookup(postcode, propertyId, property, (schedule, error) -> {
+            api.close(); refresh.run();
+            if (error != null) toast(error.getMessage());
+            else toast(schedule.title() + " \u00B7 " + schedule.detail());
+        });
+    }
+
+    private void clearBinAddress() {
+        if (!BinReminder.hasSavedAddress(this)) { toast("No saved bin address"); return; }
+        new AlertDialog.Builder(this, Ui.DIALOG).setTitle("Clear bin reminders?")
+                .setMessage("Remove the saved property reference and cached collection schedule from this app?")
+                .setPositiveButton("Clear", (dialog, which) -> {
+                    BinReminder cache = new BinReminder(this, (title, detail, upcoming) -> { });
+                    cache.clear(); cache.close(); refresh();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void openBinChecker() {
+        try { startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(BinReminder.CHECKER))); }
+        catch (android.content.ActivityNotFoundException | SecurityException error) { toast("No browser is available to open the council checker"); }
+    }
+
+    private void toast(String message) {
+        android.widget.Toast.makeText(this, message == null || message.isEmpty() ? "Bin lookup unavailable" : message,
+                android.widget.Toast.LENGTH_LONG).show();
     }
     private boolean step(Config.Choice c, int by) {
         int i = Arrays.asList(c.values).indexOf(cfg.get(c));
