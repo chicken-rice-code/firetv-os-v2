@@ -1,6 +1,6 @@
 # Home Together
 
-Native Java dashboard for Android-based Fire OS and Android TV. The design uses a near-black ambient background, two aligned header baselines, one favourites row with installed TV artwork, and an unboxed current-weather strip with twelve hourly forecasts in two rows of six. The clock, greeting and main weather temperatures use the same size and regular font weight. Layout proportions adapt to 720p, 1080p and 4K. No Play Services or external runtime libraries are used.
+Native Java dashboard for Android-based Fire OS and Android TV. The design uses a near-black ambient background, two aligned header baselines, one favourites row with installed TV artwork, and twelve hourly forecasts in a single horizontal row showing six at a time. Current conditions stay fixed while the forecast scrolls. The clock, greeting and current temperature use the same size and regular weight; hourly temperatures use smaller text. Layout proportions adapt to 720p, 1080p and 4K. No Play Services or external runtime libraries are used.
 
 ## Build and install
 
@@ -24,8 +24,10 @@ Installing the APK does not change the system's default launcher. Fire TV Home-b
 - Settings → Choose and reorder favourites: select actual installed apps and change their order. An empty row shows Add apps.
 - Settings → Weather location: enter a town/city and country. Coordinates and timezone are saved after a successful lookup. Temperature units can be Celsius or Fahrenheit. Unconfigured weather shows Set weather location.
 - TV settings and inputs are available within Settings, preserving one app row on the dashboard.
+- Settings → Home screen → Greeting name: enter the name to use after the greeting. It is saved locally; blank shows the greeting without a name. Long names are shortened on screen with an ellipsis while keeping the same font size. No Amazon account link is used.
+- Down from an app enters the weather row. Left/right scrolls the twelve hours with six visible; Up or Back returns to the selected app. The timeline also supports dragging horizontally.
 
-The clock follows the device's local timezone and preferred format and updates once a minute while visible. Greeting periods are 05:00–11:59, 12:00–17:59 and 18:00–04:59. Weather uses the selected location's timezone, including day/night icons. All twelve forecast times, icons and temperatures align within two rows of six.
+The top clock uses 24-hour time (`HH:mm`) in the device's local timezone, abbreviates the weekday and updates once a minute while visible. The header divider has equal gaps to the clock and greeting. Forecast time format can be changed separately in Weather settings. Greeting periods are 05:00–11:59, 12:00–17:59 and 18:00–04:59. Weather uses the selected location's timezone, including day/night icons. All twelve forecast times, icons and temperatures align within one scrollable row. Scrolling with the remote moves whole columns to keep six complete slots visible.
 
 Weather comes from [Open-Meteo](https://open-meteo.com/en/docs), with approximately 30-minute refresh, HTTPS timeouts, cancellation while hidden and exponential retry backoff. Last successful data survives process restarts. Old/offline readings are explicitly labelled; unavailable readings are never fabricated. This app sends the chosen place/coordinates and network address to Open-Meteo and does not request GPS access. The free endpoint is intended here for personal, non-commercial use. Provider and icon attribution are in Settings.
 

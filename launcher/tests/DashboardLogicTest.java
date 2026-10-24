@@ -16,7 +16,7 @@ public final class DashboardLogicTest {
     private static long at(String iso) { return ZonedDateTime.parse(iso).toInstant().toEpochMilli(); }
     private static void greeting(String time, String period) {
         String value = DashboardLogic.greetingAt(at("2026-10-24T" + time + "+01:00[Europe/London]"), TimeZone.getTimeZone("Europe/London"));
-        check(value.equals("Good " + period + ", Lizzie & Jimmi"), time + " " + period);
+        check(value.equals("Good " + period), time + " " + period);
     }
     public static void main(String[] args) {
         greeting("04:59", "evening"); greeting("05:00", "morning");
@@ -24,6 +24,10 @@ public final class DashboardLogicTest {
         greeting("17:59", "afternoon"); greeting("18:00", "evening");
         greeting("23:59", "evening"); greeting("00:00", "evening");
         long noon = at("2026-10-24T12:00Z[UTC]");
+        check("Good afternoon, Sam".equals(DashboardLogic.greetingAt(noon, TimeZone.getTimeZone("UTC"), "Sam")), "configured greeting name");
+        check("Good afternoon".equals(DashboardLogic.greetingAt(noon, TimeZone.getTimeZone("UTC"), "   ")), "empty name has no comma");
+        check("Good afternoon".equals(DashboardLogic.greetingAt(noon, TimeZone.getTimeZone("UTC"), null)), "unset name is safe");
+        check("Sam & Alex".equals(DashboardLogic.greetingName("  Sam  &\nAlex  ")), "name stays on one line");
         check(DashboardLogic.greetingAt(noon, TimeZone.getTimeZone("America/Los_Angeles")).contains("morning"), "timezone change");
         long before = at("2026-10-25T01:59+01:00[Europe/London]");
         long after = at("2026-10-25T01:00Z[Europe/London]");

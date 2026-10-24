@@ -57,16 +57,17 @@ public final class Options extends Activity {
                 startActivity(new android.content.Intent(this, Favorites.class))));
 
         list.addView(section("TV AND TIME"));
-        addTileGrid(list, choice(Config.CLOCK), choice(Config.SWITCH), action("TV settings", this::tvSettings),
+        addTileGrid(list, choice(Config.SWITCH), action("TV settings", this::tvSettings),
                 action("Open a TV input", this::openInput));
 
         list.addView(section("WEATHER"));
         View location = weatherLocation();
-        addTileGrid(list, location, choice(Config.UNITS));
+        addTileGrid(list, location, choice(Config.UNITS), choice(Config.CLOCK));
         if (getIntent().getBooleanExtra("weather", false)) location.post(() -> location.performClick());
 
         list.addView(section("HOME SCREEN"));
         addTileGrid(list,
+                greetingName(),
                 action("Reset order, names and hidden tiles", this::reset),
                 action("Open Amazon's home screen", () -> {
                     Guard.amazon(this);
@@ -130,6 +131,40 @@ public final class Options extends Activity {
         refreshers.add(() -> style(tile));
         return tile;
     }
+    private View greetingName() {
+        LinearLayout tile = row();
+        tile.setOrientation(LinearLayout.VERTICAL);
+        TextView label = Ui.text(this, 12, Ui.MUTED, Ui.MEDIUM);
+        label.setText("Greeting name");
+        TextView value = Ui.text(this, 17, Ui.TEXT, Ui.MEDIUM);
+        value.setMaxLines(2);
+        Runnable show = () -> {
+            String name = DashboardLogic.greetingName(cfg.get("greeting.name", ""));
+            value.setText(name.isEmpty() ? "Not set" : name);
+        };
+        tile.addView(label);
+        LinearLayout.LayoutParams valueLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, WRAP);
+        valueLp.topMargin = dp(Ui.SPACE_XS);
+        tile.addView(value, valueLp);
+        tile.setOnClickListener(v -> {
+            EditText input = new EditText(this);
+            input.setSingleLine(true);
+            input.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(80)});
+            input.setText(cfg.get("greeting.name", ""));
+            input.setSelection(input.length());
+            new AlertDialog.Builder(this, Ui.DIALOG).setTitle("Greeting name")
+                    .setMessage("Enter the name to use on the home screen. Leave blank for a greeting without a name.")
+                    .setView(input)
+                    .setPositiveButton("Save", (d, which) -> {
+                        cfg.set("greeting.name", DashboardLogic.greetingName(input.getText().toString()));
+                        show.run();
+                    }).setNegativeButton("Cancel", null).show();
+        });
+        refreshers.add(show);
+        refreshers.add(() -> style(tile));
+        return tile;
+    }
+
     private View weatherLocation() {
         LinearLayout tile = row();
         tile.setOrientation(LinearLayout.VERTICAL);

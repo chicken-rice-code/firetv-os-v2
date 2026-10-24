@@ -9,11 +9,16 @@ final class DashboardLogic {
     static final long WEATHER_INTERVAL = 30 * 60 * 1000L;
     private DashboardLogic() {}
     static String greetingAt(long now, TimeZone zone) {
+        return greetingAt(now, zone, "");
+    }
+    static String greetingAt(long now, TimeZone zone, String name) {
         Calendar c = Calendar.getInstance(zone); c.setTimeInMillis(now);
         int h = c.get(Calendar.HOUR_OF_DAY);
-        return "Good " + (h >= 5 && h < 12 ? "morning" : h >= 12 && h < 18 ? "afternoon" : "evening")
-                + ", Lizzie & Jimmi";
+        String greeting = "Good " + (h >= 5 && h < 12 ? "morning" : h >= 12 && h < 18 ? "afternoon" : "evening");
+        String displayName = greetingName(name);
+        return displayName.isEmpty() ? greeting : greeting + ", " + displayName;
     }
+    static String greetingName(String name) { return name == null ? "" : name.trim().replaceAll("\\s+", " "); }
     static boolean stale(long timestamp, long now) {
         return timestamp <= 0 || now < timestamp || now - timestamp >= WEATHER_INTERVAL;
     }

@@ -139,7 +139,7 @@ public final class Home extends Activity {
         String mode = cfg.get(Config.CLOCK);
         return "24h".equals(mode) || "auto".equals(mode) && DateFormat.is24HourFormat(this);
     }
-    private void tick() { screen.header.update(is24Hour()); weather.refresh(cfg); }
+    private void tick() { screen.header.update(true, cfg.get("greeting.name", "")); weather.refresh(cfg); }
     private void openOptions(boolean location) {
         initialFocusDone = true;
         lastFocus = location ? "weather" : "settings";

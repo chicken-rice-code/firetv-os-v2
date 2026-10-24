@@ -65,7 +65,7 @@ final class Config {
     static final Choice LABELS = new Choice("labels", "App names", "always",
             new String[] {"always", "focus", "never"},
             new String[] {"Always", "On focus", "Never"});
-    static final Choice CLOCK = new Choice("clock", "Clock", "auto",
+    static final Choice CLOCK = new Choice("clock", "Forecast time format", "auto",
             new String[] {"auto", "24h", "12h"},
             new String[] {"System", "24-hour", "12-hour"});
     static final Choice UNITS = new Choice("weather.units", "Temperature units", "celsius",

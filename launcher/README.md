@@ -4,10 +4,10 @@ A native Fire TV dashboard with your apps, a shared greeting and real local weat
 
 - **Small native APK.** Plain Java and Android views. No AndroidX, Kotlin, Compose, Play
   Services or any other library.
-- **Weather beneath your apps.** Current conditions, feels-like temperature, high/low and twelve hourly forecasts come from Open-Meteo for a city chosen in Settings. All twelve hours stay visible in two rows of six. Successful readings are cached and labelled when stale or offline. The city/coordinates and network address go to Open-Meteo; device location is not read.
+- **Weather beneath your apps.** Current conditions, feels-like temperature, high/low and twelve hourly forecasts come from Open-Meteo for a city chosen in Settings. Six forecast hours fit in one row; scroll horizontally to see all twelve while current conditions stay fixed. Successful readings are cached and labelled when stale or offline. The city/coordinates and network address go to Open-Meteo; device location is not read.
 - **No runtime permissions.** Fire OS 6 uses three permissions capped at Android 8.1. Weather uses the normal INTERNET permission. Check: `aapt2 dump permissions dumbtv-home.apk`.
 - **No ads, no recommended rows, no account, no analytics, no update checks.**
-- **One consistent UI kit.** A near-black ambient canvas, charcoal surfaces, white focus outlines and a gentle 160 ms focus animation. Six installed-app banners fit across one row with labels beneath. The clock, greeting and main weather temperatures share the same font size and weight.
+- **One consistent UI kit.** A near-black ambient canvas, charcoal surfaces, white focus outlines and a gentle 160 ms focus animation. Six installed-app banners fit across one row with labels beneath. The clock, greeting and current temperature share the same size and regular weight; hourly temperatures use smaller text.
 - Resource use is checked on the development emulator; current-session results are recorded in git-ignored `report/`. Fire TV hardware measurements for this UI are outstanding.
 
 ## Install
@@ -35,6 +35,9 @@ Undo: `./launcher/install.sh --undo` gives HOME back to Amazon's launcher.
 | Hold OK, or ☰ Menu | Move, Rename, Hide, App info |
 | Move mode | ◀ ▶ moves the tile, any other key drops it |
 | Up from the app row | Settings |
+| Down from an app | browse the hourly weather forecast |
+| Left/right within weather | scroll through the twelve hourly forecasts |
+| Up from weather | return to the selected app |
 | Back on the home screen | return focus to an app |
 | On an input: Back | back to the home screen |
 | On an input: ☰ Menu | show the input's name again |
@@ -44,7 +47,8 @@ Undo: `./launcher/install.sh --undo` gives HOME back to Amazon's launcher.
 
 | Setting | Choices |
 |---|---|
-| Clock | system, 24-hour, 12-hour |
+| Forecast time format | system, 24-hour, 12-hour; the top clock always uses 24-hour time |
+| Greeting name | name entered in Settings; blank shows a greeting without a name |
 | Temperature | Celsius or Fahrenheit |
 | Weather location | town/city and country; blank turns weather off |
 | Open inputs with | Automatic, the TV's app, dumbtv home (see below) |

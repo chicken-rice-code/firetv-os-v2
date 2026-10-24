@@ -30,6 +30,10 @@ JAR=$SDK/platforms/android-$MIN_SDK/android.jar
 BT=$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -1 || true)
 [[ -f $JAR ]] || { echo "error: $JAR missing — sdkmanager 'platforms;android-$MIN_SDK'" >&2; exit 1; }
 [[ -x $BT/aapt2 ]] || { echo "error: no build-tools in $SDK — sdkmanager 'build-tools;34.0.0'" >&2; exit 1; }
+DEXER=$BT/d8
+SIGNER=$BT/apksigner
+[[ -f $BT/d8.bat ]] && DEXER=$BT/d8.bat
+[[ -f $BT/apksigner.bat ]] && SIGNER=$BT/apksigner.bat
 
 JDK17_PATHS=(/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home /usr/lib/jvm/java-17-openjdk)
 javac_major() { "$1/bin/javac" -version 2>&1 | sed -n 's/^javac \([0-9]*\).*/\1/p'; }
@@ -76,20 +80,20 @@ mkdir -p "$WORK/gen" "$WORK/classes" build
   --java "$WORK/gen" -o "$WORK/app.apk"
 
 native_path() {
-  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s\\n' "$1"; fi
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s\n' "$1"; fi
 }
 find src "$WORK/gen" -name '*.java' | while IFS= read -r file; do native_path "$file"; done > "$WORK/sources.txt"
 "$JAVA_HOME/bin/javac" --release 8 -Xlint:all -Xlint:-options -Werror -encoding UTF-8 \
   -classpath "$JAR" -d "$WORK/classes" @"$WORK/sources.txt"
 
 find "$WORK/classes" -name '*.class' | while IFS= read -r file; do native_path "$file"; done > "$WORK/classes.txt"
-"$BT/d8.bat" "$DEX_MODE" --min-api "$MIN_SDK" --lib "$JAR" --output "$WORK" @"$WORK/classes.txt"
+"$DEXER" "$DEX_MODE" --min-api "$MIN_SDK" --lib "$JAR" --output "$WORK" @"$WORK/classes.txt"
 (cd "$WORK" && "$JAVA_HOME/bin/jar" uf app.apk classes.dex)
 
 "$BT/zipalign" -f -p 4 "$WORK/app.apk" "$WORK/aligned.apk"
-"$BT/apksigner.bat" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYPASS" --key-pass "pass:$KEYPASS" \
+"$SIGNER" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYPASS" --key-pass "pass:$KEYPASS" \
   --out "$OUTPUT" "$WORK/aligned.apk"
-"$BT/apksigner.bat" verify "$OUTPUT"
+"$SIGNER" verify "$OUTPUT"
 
 perms=$("$BT/aapt2" dump permissions "$OUTPUT" | grep -c 'uses-permission' || true)
 printf 'built %s  %s bytes  %s uses-permission entries\n' "$OUTPUT" \
